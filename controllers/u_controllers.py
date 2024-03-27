@@ -20,7 +20,7 @@ text_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50) 
 openai_uembeddings = OpenAIEmbeddings(openai_api_key=u_openai_api_key)
 supabase_uclient = create_client(u_supabase_url,u_supabase_api_key)
 #creating llm
-llm = ChatOpenAI(openai_api_key="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")
+llm = ChatOpenAI(openai_api_key=u_openai_api_key)
 #creating retriever u_context
 u_vecstore = SupabaseVectorStore(embedding=openai_uembeddings,client=supabase_uclient,query_name="match_flexnet",table_name="flexnet")
 a_u = u_vecstore.as_retriever()
