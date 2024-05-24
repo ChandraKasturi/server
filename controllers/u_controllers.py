@@ -19,7 +19,7 @@ u_supabase_url = "https://uuvgdpvtndnglygvblht.supabase.co"
 u_supabase_api_key = ""
 
 #create a splitter
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50,separators=[" "]) # ["\n\n", "\n", " ", ""] are default values
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50) # ["\n\n", "\n", " ", ""] are default values
 openai_uembeddings = OpenAIEmbeddings(openai_api_key=u_openai_api_key)
 supabase_uclient = create_client(u_supabase_url,u_supabase_api_key)
 #creating llm
@@ -34,17 +34,38 @@ retrieveruimguurl_from_llm = MultiQueryRetriever.from_llm(retriever=a_uimageuurl
 
 
 
+
+
+
+def loginU(user,password):
+	rowU = c.saharsa_users.users.find({"$and":[{"username":{"$eq":f"{user}"}},{"password":{"$eq":f"{password}"}}]})
+	if rowU:
+		return True
+	return False
+
+
+
+
+
+
+
+
+
+
+
+
+
 def getUimageuurl(ucontext):
 	return retrieveruimguurl_from_llm.get_relevant_documents(query=ucontext)
 
 
 def UploadUGImageUUrl(file):
-	#text_image_usplitter = CharacterTextSplitter(chunk_size=10,chunk_overlap=0,separator="\n") # need it store a valid image uurl
-	#file_ubytes_uimg = open(file,"rb").read()
-	#u_text_uimg = text_image_usplitter.create_documents([str(file_ubytes_uimg)])
-	#print(u_text_uimg)
-	file_ubytes_uimg = open(file,"rb").read().decode('utf-8').split("\n") # need to handle cases not utf-8
-	u_text_uimg = [Document(i) for i in file_ubytes_uimg]
+	text_image_usplitter = CharacterTextSplitter(chunk_size=10,chunk_overlap=0,separator="\n") # need it store a valid image uurl
+	file_ubytes_uimg = open(file,"rb").read()
+	u_text_uimg = text_image_usplitter.create_documents([str(file_ubytes_uimg)])
+	print(u_text_uimg)
+	#file_ubytes_uimg = open(file,"rb").read().decode('utf-8').split("\n") # need to handle cases not utf-8
+	#u_text_uimg = [Document(i) for i in file_ubytes_uimg]
 	print(u_text_uimg)
 	vector_ustore_uimg  = SupabaseVectorStore.from_documents(u_text_uimg,openai_uembeddings,client=supabase_uclient,table_name="uimageurl")
 
@@ -53,7 +74,7 @@ def UploadUGImageUUrl(file):
 def UploadUGVector(file):
 	file_ubytes = open(file,"rb").read()
 	u_text = text_splitter.create_documents([str(file_ubytes)])
-	vector_ustore = SupabaseVectorStore.from_documents(u_text,openai_uembeddings,client=supabase_uclient,table_name="getimage")
+	vector_ustore = SupabaseVectorStore.from_documents(u_text,openai_uembeddings,client=supabase_uclient,table_name="science")
 	return vector_ustore
 
 
@@ -98,7 +119,7 @@ def getUanswer(data):
 	print(questionUchain)
 	generatedUquestion = questionUchain.invoke({"udata":data}) # a second invoke before main uinvoke bad way will change
 	print(generatedUquestion)
-	standaloneTemplate = "Answer the Question only on the following context: {context}\n\nQuestion: {question}"
+	standaloneTemplate = "Keep the references or figures to any .png or keep the markdown syntax for the .png in between the sentence in the context Answer the Question with the references only on the following context : {context}\n\nQuestion: {question}"
 	standalonePrompt = PromptTemplate.from_template(standaloneTemplate)
 	ug_page_content = [u.page_content for u in retrieveru_from_llm.get_relevant_documents(query=data)]
 	ug_topics = [supabase_uclient.table("science").select("topic,subtopic").eq('content',u).execute() for u in ug_page_content]
