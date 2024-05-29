@@ -9,14 +9,19 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.documents import Document
+
+
+
+from services.questionbank.mongo.questionbankrepu import insertIntoQuestionsU
+
 import pymongo
 
 #U_KEYS
 
 c = pymongo.MongoClient("mongodb+srv://chandrakasturi:Bisleri1234@cluster0.ehbe5dz.mongodb.net/",server_api=pymongo.server_api.ServerApi('1'))
-u_openai_api_key = ""
+u_openai_api_key = "dsk-bFXQcar4KFjHvoVnKFDpT3BlbkFJZWCKgUfSj1bCXKniOW8X"
 u_supabase_url = "https://uuvgdpvtndnglygvblht.supabase.co"
-u_supabase_api_key = ""
+u_supabase_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1dmdkcHZ0bmRuZ2x5Z3ZibGh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDkxMDkzNTUsImV4cCI6MjAyNDY4NTM1NX0.MNSga3iZ_SnjdUVgxva71uqJJK9S5SFhD0MgJ-_boVs"
 
 #create a splitter
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50) # ["\n\n", "\n", " ", ""] are default values
@@ -34,6 +39,9 @@ retrieveruimguurl_from_llm = MultiQueryRetriever.from_llm(retriever=a_uimageuurl
 
 
 
+
+def InsertQuestionU(collectionU):
+	return insertIntoQuestionsU(c,collectionU)
 
 
 
