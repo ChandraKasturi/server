@@ -9,19 +9,21 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.documents import Document
+import secrets
+import string
+import datetime
 
 
-
-from services.questionbank.mongo.questionbankrepu import insertIntoQuestionsU
+from services.questionbank.mongo.questionbankrepu import insertIntoQuestionsU,CheckifEmailPresent
 
 import pymongo
 
 #U_KEYS
 
-c = pymongo.MongoClient("mongodb+srv://chandrakasturi:Bisleri1234@cluster0.ehbe5dz.mongodb.net/",server_api=pymongo.server_api.ServerApi('1'))
-u_openai_api_key = "dsk-bFXQcar4KFjHvoVnKFDpT3BlbkFJZWCKgUfSj1bCXKniOW8X"
+c = pymongo.MongoClient()
+u_openai_api_key = ""
 u_supabase_url = "https://uuvgdpvtndnglygvblht.supabase.co"
-u_supabase_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1dmdkcHZ0bmRuZ2x5Z3ZibGh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDkxMDkzNTUsImV4cCI6MjAyNDY4NTM1NX0.MNSga3iZ_SnjdUVgxva71uqJJK9S5SFhD0MgJ-_boVs"
+u_supabase_api_key = ""
 
 #create a splitter
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50) # ["\n\n", "\n", " ", ""] are default values
@@ -46,12 +48,32 @@ def InsertQuestionU(collectionU):
 
 
 def loginU(user,password):
-	rowU = c.saharsa_users.users.find({"$and":[{"username":{"$eq":f"{user}"}},{"password":{"$eq":f"{password}"}}]})
+	rowU = c.sahasra_users.users.find({"$and":[{"username":{"$eq":f"{user}"}},{"password":{"$eq":f"{password}"}}]})
 	if rowU:
 		return True
 	return False
 
+def registerU(rModel):
+	rowU = c.sahasra_users.users.find({"$or":[{"username":{"$eq":dict(rModel).username}},{"email":{"$eq":dict(rModel).email}}]})
+	if rowU != 1:
+		return False
+	c.saharsa_users.users.insert(dict(rModel))
+	return True
+	
 
+def forgotPasswordU(forgotuModel):
+	emailU = dict(forgotuModel).email
+	token = ''.join([secrets.choice(string.ascii_uppercase+string.digits) for i in range(6)])
+	emailTakenU = CheckifEmailPresent(emailU)
+	if emailTakenU:
+		c.sahasra_tokens.tokens.create_index("ExpiresAt",expiresAfterSeconds=10*60*60)
+		c.sahasra_tokens.tokens.insert_one({"email":emailTakenU,"token":token,"ExpiresAt":datetime.datetime.utcnow()})
+		try:
+			sendmail(emailTakenU,token)
+			return "IF the Email You Provided Exists in our Database The reset Link Should be in Your Inbox Please Check your mail"
+		except Exception as e:
+			print(e)
+			return "something Went Wrong"
 
 
 
