@@ -76,6 +76,20 @@ def forgotPasswordU(forgotuModel):
 			return "something Went Wrong"
 
 
+def updatePasswordU(password,token):
+	token_dbu = c.sahasra_tokens.token.find_one({"token":token})
+	if token_dbu and token_dbu.token == token:
+		try:
+			_ = c.sahasra_users.users.update_one({"email":token_dbu.email},{"$set":{"password":password}})
+			return "Password Updated SuccessFully You May Login Now"
+		except Exception as e:
+			print(e)
+			return "Something Went Wrong"
+	elif token_dbu and token_dbu.token != token:
+		return "Wrong Token"
+	else:
+		return "Token Expired Try againU"
+
 
 
 
