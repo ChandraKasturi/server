@@ -4,11 +4,14 @@ from langchain_text_splitters import CharacterTextSplitter,RecursiveCharacterTex
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain.vectorstores import SupabaseVectorStore
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate,PromptTemplate
+from langchain_core.prompts import MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.documents import Document
+from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory
 import secrets
 import string
 import datetime
@@ -20,7 +23,7 @@ import pymongo
 
 #U_KEYS
 
-c = pymongo.MongoClient()
+c = pymongo.MongoClient("mongodb+srv://chandrakasturi:Bisleri1234@cluster0.ehbe5dz.mongodb.net/",server_api=pymongo.server_api.ServerApi('1'))
 u_openai_api_key = ""
 u_supabase_url = "https://uuvgdpvtndnglygvblht.supabase.co"
 u_supabase_api_key = ""
@@ -35,7 +38,7 @@ llm = ChatOpenAI(openai_api_key=u_openai_api_key)
 u_vecstore = SupabaseVectorStore(embedding=openai_uembeddings,client=supabase_uclient,query_name="match_science1",table_name="science")
 u_vecstore_uimageuurl = SupabaseVectorStore(embedding=openai_uembeddings,client=supabase_uclient,query_name="match_u_image_uurl",table_name="uimageurl")
 a_u = u_vecstore.as_retriever()
-a_uimageuurl = u_vecstore_uimageuurl.as_retriever()
+a_uimageuurl = u_vecstore_uimageuurl.as_retriever()	
 retrieveru_from_llm = MultiQueryRetriever.from_llm(retriever=a_u,llm=llm)
 retrieveruimguurl_from_llm = MultiQueryRetriever.from_llm(retriever=a_uimageuurl,llm=llm)
 
@@ -123,7 +126,7 @@ def UploadUGVector(file):
 
 
 
-def AssessUContent(udata):
+def AssessUContent(udata,sessionIdu):
 	u_response = {}
 	u_response["response"] = []
 	CheckUprompt = PromptTemplate.from_template("Answer Only AS YES OR NO IN CAPTIALS Answer whether the following statement is Related to this Context: \n Context:{context}\n Statement:{statement}")
@@ -143,7 +146,7 @@ def AssessUContent(udata):
 				collection_questionu = c.sahasra_questions.questionbank.find({"topic":ug.data[0]["topic"]})
 				u_questions.extend([dict(ug) for ug in collection_questionu ])
 		return u_questions
-	u_response["response"].extend([{"text":getUanswer(udata)[0]},{"images":[ug.data[0]["imageu_uurl"] for ug in ug_topics]},{"videos":[ug.data[0]["videou_uurl"] for ug in ug_topics]},{"formula":[ug.data[0]["u_formula"] for ug in ug_topics]}])
+	u_response["response"].extend([{"text":getUanswer(udata,sessionIdu)[0]},{"images":[ug.data[0]["imageu_uurl"] for ug in ug_topics]},{"videos":[ug.data[0]["videou_uurl"] for ug in ug_topics]},{"formula":[ug.data[0]["u_formula"] for ug in ug_topics]}])
 	return u_response
 
 
@@ -154,7 +157,7 @@ def getUtweet(data):
 	return chain.invoke({"productDesc":data})["str"]
 
 
-def getUanswer(data):
+def getUanswer(data,sessionIdu):
 	print("ugly")
 	print(retrieveru_from_llm)
 	questionualoneTemplate = "generate a question based on the following: {udata}"
@@ -163,15 +166,19 @@ def getUanswer(data):
 	print(questionUchain)
 	generatedUquestion = questionUchain.invoke({"udata":data}) # a second invoke before main uinvoke bad way will change
 	print(generatedUquestion)
-	standaloneTemplate = "Keep the references or figures to any .png or keep the markdown syntax for the .png in between the sentence in the context Answer the Question with the references only on the following context : {context}\n\nQuestion: {question}"
-	standalonePrompt = PromptTemplate.from_template(standaloneTemplate)
+	standaloneTemplate = "Keep the references or figures to any .png or keep the markdown syntax for the .png in between the sentence in the context Answer the Question with the references only on the following context If The Question is Not Related to The Context Act As Usual : {context}\n\n"
+	chatGeneratedUTemplate = ChatPromptTemplate.from_messages([("system",standaloneTemplate),MessagesPlaceholder(variable_name="history"),("human","Question: {question}")])
+	#standalonePrompt = PromptTemplate.from_template(standaloneTemplate)
 	ug_page_content = [u.page_content for u in retrieveru_from_llm.get_relevant_documents(query=data)]
 	ug_topics = [supabase_uclient.table("science").select("topic,subtopic").eq('content',u).execute() for u in ug_page_content]
 	print(ug_topics)
 	metaDatau = [u.metadata for u in retrieveru_from_llm.get_relevant_documents(query=data)]
 	retriever = "".join(ug_page_content)
-	standAloneChain = {"context":lambda x: retriever,"question":RunnablePassthrough()} | standalonePrompt | llm | StrOutputParser()
-	return standAloneChain.invoke(generatedUquestion),metaDatau	
+	standAloneChain =  chatGeneratedUTemplate | llm | StrOutputParser()
+	standAloneUChainWithHistory = RunnableWithMessageHistory(standAloneChain,lambda sessionIdu: MongoDBChatMessageHistory(session_id=sessionIdu,connection_string="mongodb+srv://chandrakasturi:Bisleri1234@cluster0.ehbe5dz.mongodb.net/",database_name="sahasra_history",collection_name="history"),input_messages_key="question",history_messages_key="history")
+	config = {"configurable":{"session_id":sessionIdu}}
+	print(f"THIS IS UG CONTEXT {retriever}")
+	return standAloneUChainWithHistory.invoke({"question":data,"context":retriever},config=config),metaDatau	
 
 
 def getUtranslate(data):
