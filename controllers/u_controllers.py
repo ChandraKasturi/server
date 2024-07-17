@@ -15,9 +15,11 @@ from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory
 import secrets
 import string
 import datetime
+import json
 
 
 from services.questionbank.mongo.questionbankrepu import insertIntoQuestionsU,CheckifEmailPresent
+from services.questionbank.mongo.emailserviceu import send_email
 
 import pymongo
 
@@ -72,7 +74,7 @@ def forgotPasswordU(forgotuModel):
 		c.sahasra_tokens.tokens.create_index("ExpiresAt",expiresAfterSeconds=10*60*60)
 		c.sahasra_tokens.tokens.insert_one({"email":emailTakenU,"token":token,"ExpiresAt":datetime.datetime.utcnow()})
 		try:
-			sendmail(emailTakenU,token)
+			send_email(emailTakenU,token)
 			return "IF the Email You Provided Exists in our Database The reset Link Should be in Your Inbox Please Check your mail"
 		except Exception as e:
 			print(e)
@@ -132,6 +134,10 @@ def AssessUContent(udata,sessionIdu):
 	CheckUprompt = PromptTemplate.from_template("Answer Only AS YES OR NO IN CAPTIALS Answer whether the following statement is Related to this Context: \n Context:{context}\n Statement:{statement}")
 	checkuChain = CheckUprompt | llm | StrOutputParser()
 	AssessUG = checkuChain.invoke({"context":"Question me,Ask me,Assess me","statement":udata})
+
+
+
+
 	ug_page_content = [u.page_content for u in retrieveru_from_llm.get_relevant_documents(query=udata)]
 	ug_topics = [supabase_uclient.table("science").select("topic,subtopic,imageu_uurl,videou_uurl,u_formula").eq('content',u).execute() for u in ug_page_content]
 	print("HEREEEEEEEEEEEE")
@@ -141,10 +147,30 @@ def AssessUContent(udata,sessionIdu):
 	print(AssessUG)
 	u_questions = []
 	if AssessUG == "YES":
-		for ug in ug_topics:
+		jsonU = open("jsonu.txt").read()
+		GetFinalUjson = PromptTemplate.from_template("IF Present in the JSON Give me A JSON Containing Subject Topic And SubTopic IF not Found OR if you Cant Find A topic And Subtopic From the Question Keep them as Empty String from the following Question: JSON:{json}\n Question:{question}\n")
+		GetFinalUchain = GetFinalUjson | llm | StrOutputParser()
+		json_withU = GetFinalUchain.invoke({"json":jsonU,"question":udata})
+		check_jsonU = json.loads(json_withU)
+		print(check_jsonU)
+		if not check_jsonU["Subject"]:
+			return "Please Provide A Valid Subject"
+
+		if not check_jsonU["Topic"] and not check_jsonU["SubTopic"]:
+			collection_questionu = c.sahasra_questions.questionbank.find({"subject":check_jsonU['Subject']})
+
+		elif check_jsonU["Topic"] and not check_jsonU["SubTopic"]:
+			collection_questionu = c.sahasra_questions.questionbank.find({"$and":[{"subject":{"$eq":f"{check_jsonU['Subject']}"}},{"topic":{"$eq":f"{check_jsonU['Topic']}"}}]})
+		else:
+			print("HERE UG")
+			collection_questionu = c.sahasra_questions.questionbank.find({"$and":[{"subject":{"$eq":f"{check_jsonU['Subject']}"}},{"topic":{"$eq":f"{check_jsonU['Topic']}"}},{"subtopic":{"$eq":f"{check_jsonU['SubTopic']}"}}]})
+
+		u_questions.extend([dict(ug) for ug in collection_questionu ])
+		"""for ug in ug_topics:
 			if ug.data[0]["topic"] and ug.data[0]["subtopic"]:
 				collection_questionu = c.sahasra_questions.questionbank.find({"topic":ug.data[0]["topic"]})
-				u_questions.extend([dict(ug) for ug in collection_questionu ])
+				u_questions.extend([dict(ug) for ug in collection_questionu ])"""
+		print(u_questions)
 		return u_questions
 	u_response["response"].extend([{"text":getUanswer(udata,sessionIdu)[0]},{"images":[ug.data[0]["imageu_uurl"] for ug in ug_topics]},{"videos":[ug.data[0]["videou_uurl"] for ug in ug_topics]},{"formula":[ug.data[0]["u_formula"] for ug in ug_topics]}])
 	return u_response
