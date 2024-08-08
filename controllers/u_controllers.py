@@ -19,7 +19,7 @@ import json
 
 
 from services.questionbank.mongo.questionbankrepu import insertIntoQuestionsU,CheckifEmailPresent
-from services.questionbank.mongo.emailserviceu import send_email
+from services.questionbank.mongo.emailserviceu import send_email,register_email
 
 import pymongo
 
@@ -58,42 +58,76 @@ def loginU(user,password):
 		return True
 	return False
 
+
+def beforeRegisterU(nModel):
+	print(dict(nModel))
+	emailU = dict(nModel)["email"]
+	fModelU = dict(nModel)
+	token = ''.join([secrets.choice(string.ascii_uppercase+string.digits) for i in range(6)])
+	emailTakenU = CheckifEmailPresent(c,emailU)
+	if not emailTakenU:
+		fModelU["token"] = token
+		fModelU["ExpiresAt"] = datetime.datetime.utcnow()
+		c.sahasra_tokens.register_tokens.create_index("ExpiresAt",expireAfterSeconds=10*60*60)
+		c.sahasra_tokens.register_tokens.insert_one(fModelU)
+		register_email(emailU,token)
+		return "Register Token Has been sent to your Email ID Please Use it to Confirm Your Registration",200
+	else:
+		return "Email Already Taken",400
+
+
 def registerU(rModel):
+	token = dict(rModel)["token"]
+	print(token)
+	token_dbu = c.sahasra_tokens.register_tokens.find_one({"token":token})
+	print(token_dbu)
+	if token_dbu and token_dbu["token"] == token:
+		try:
+			_ = c.sahasra_users.users.insert_one(dict(rModel))
+			return "User Registered SuccessFully You May Login Now"
+		except Exception as e:
+			print(e)
+			return "Something Went Wrong"
+	elif token_dbu and token_dbu["token"] != token:
+		return "Wrong Token"
+	else:
+		return "Token Expired Try againU"
+	'''emailU = dict(rModel).email
 	rowU = c.sahasra_users.users.find({"$or":[{"username":{"$eq":dict(rModel).username}},{"email":{"$eq":dict(rModel).email}}]})
 	if rowU != 1:
 		return False
 	c.saharsa_users.users.insert(dict(rModel))
-	return True
+	return True'''
 	
 
 def forgotPasswordU(forgotuModel):
-	emailU = dict(forgotuModel).email
+	emailU = dict(forgotuModel)["email"]
 	token = ''.join([secrets.choice(string.ascii_uppercase+string.digits) for i in range(6)])
-	emailTakenU = CheckifEmailPresent(emailU)
+	emailTakenU = CheckifEmailPresent(c,emailU)
 	if emailTakenU:
-		c.sahasra_tokens.tokens.create_index("ExpiresAt",expiresAfterSeconds=10*60*60)
-		c.sahasra_tokens.tokens.insert_one({"email":emailTakenU,"token":token,"ExpiresAt":datetime.datetime.utcnow()})
+		c.sahasra_tokens.password_tokens.create_index("ExpiresAt",expireAfterSeconds=10*60*60)
+		c.sahasra_tokens.password_tokens.insert_one({"email":emailTakenU,"token":token,"ExpiresAt":datetime.datetime.utcnow()})
 		try:
 			send_email(emailTakenU,token)
-			return "IF the Email You Provided Exists in our Database The reset Link Should be in Your Inbox Please Check your mail"
+			return "IF the Email You Provided Exists in our Database The reset Link Should be in Your Inbox Please Check your mail",200
 		except Exception as e:
 			print(e)
-			return "something Went Wrong"
+			return "something Went Wrong",400
 
 
 def updatePasswordU(password,token):
-	token_dbu = c.sahasra_tokens.token.find_one({"token":token})
+	token_dbu = c.sahasra_tokens.password_tokens.find_one({"token":token})
 	if token_dbu and token_dbu.token == token:
 		try:
 			_ = c.sahasra_users.users.update_one({"email":token_dbu.email},{"$set":{"password":password}})
-			return "Password Updated SuccessFully You May Login Now"
+			return "Password Updated SuccessFully You May Login Now",200
 		except Exception as e:
 			print(e)
-			return "Something Went Wrong"
+			return "Something Went Wrong",400
 	elif token_dbu and token_dbu.token != token:
-		return "Wrong Token"
+		return "Wrong Token",400
 	else:
-		return "Token Expired Try againU"
+		return "Token Expired Try againU",400
 
 
 
@@ -147,14 +181,15 @@ def AssessUContent(udata,sessionIdu):
 	print(AssessUG)
 	u_questions = []
 	if AssessUG == "YES":
-		jsonU = open("jsonu.txt").read()
-		GetFinalUjson = PromptTemplate.from_template("IF Present in the JSON Give me A JSON Containing Subject Topic And SubTopic IF not Found OR if you Cant Find A topic And Subtopic From the Question Keep them as Empty String from the following Question: JSON:{json}\n Question:{question}\n")
+		jsonU = json.dumps([i for i in c.sahasra_subjectdata.topic_subtopic.find({},{"_id":0})])
+		print(jsonU)
+		GetFinalUjson = PromptTemplate.from_template("IF Present in the JSON Give me A JSON Containing Subject Topic And SubTopic IF not Found OR if you Cant Find A topic And Subtopic From the Question Keep them as Empty String from the following Question The exact Keys Must Subject Topic and SubTopic: JSON:{json}\n Question:{question}\n")
 		GetFinalUchain = GetFinalUjson | llm | StrOutputParser()
 		json_withU = GetFinalUchain.invoke({"json":jsonU,"question":udata})
 		check_jsonU = json.loads(json_withU)
 		print(check_jsonU)
 		if not check_jsonU["Subject"]:
-			return "Please Provide A Valid Subject"
+			return "Please Provide A Valid Subject,Topic Or SubTopic"
 
 		if not check_jsonU["Topic"] and not check_jsonU["SubTopic"]:
 			collection_questionu = c.sahasra_questions.questionbank.find({"subject":check_jsonU['Subject']})
@@ -163,6 +198,7 @@ def AssessUContent(udata,sessionIdu):
 			collection_questionu = c.sahasra_questions.questionbank.find({"$and":[{"subject":{"$eq":f"{check_jsonU['Subject']}"}},{"topic":{"$eq":f"{check_jsonU['Topic']}"}}]})
 		else:
 			print("HERE UG")
+			print(check_jsonU)
 			collection_questionu = c.sahasra_questions.questionbank.find({"$and":[{"subject":{"$eq":f"{check_jsonU['Subject']}"}},{"topic":{"$eq":f"{check_jsonU['Topic']}"}},{"subtopic":{"$eq":f"{check_jsonU['SubTopic']}"}}]})
 
 		u_questions.extend([dict(ug) for ug in collection_questionu ])
@@ -192,7 +228,7 @@ def getUanswer(data,sessionIdu):
 	print(questionUchain)
 	generatedUquestion = questionUchain.invoke({"udata":data}) # a second invoke before main uinvoke bad way will change
 	print(generatedUquestion)
-	standaloneTemplate = "Keep the references or figures to any .png or keep the markdown syntax for the .png in between the sentence in the context Answer the Question with the references only on the following context If The Question is Not Related to The Context Act As Usual : {context}\n\n"
+	standaloneTemplate = "Keep the references or figures or links to any .png or keep the markdown syntax for the .png in between the sentence in the context Answer the Question with the references only on the following context If The Question is Not Related to The Context Act As Usual: {context}\n\n"
 	chatGeneratedUTemplate = ChatPromptTemplate.from_messages([("system",standaloneTemplate),MessagesPlaceholder(variable_name="history"),("human","Question: {question}")])
 	#standalonePrompt = PromptTemplate.from_template(standaloneTemplate)
 	ug_page_content = [u.page_content for u in retrieveru_from_llm.get_relevant_documents(query=data)]
