@@ -171,7 +171,6 @@ def AssessUContent(udata,sessionIdu):
 
 
 
-
 	ug_page_content = [u.page_content for u in retrieveru_from_llm.get_relevant_documents(query=udata)]
 	ug_topics = [supabase_uclient.table("science").select("topic,subtopic,imageu_uurl,videou_uurl,u_formula").eq('content',u).execute() for u in ug_page_content]
 	print("HEREEEEEEEEEEEE")
@@ -183,11 +182,25 @@ def AssessUContent(udata,sessionIdu):
 	if AssessUG == "YES":
 		jsonU = json.dumps([i for i in c.sahasra_subjectdata.topic_subtopic.find({},{"_id":0})])
 		print(jsonU)
-		GetFinalUjson = PromptTemplate.from_template("IF Present in the JSON Give me A JSON Containing Subject Topic And SubTopic IF not Found OR if you Cant Find A topic And Subtopic From the Question Keep them as Empty String from the following Question The exact Keys Must Subject Topic and SubTopic: JSON:{json}\n Question:{question}\n")
+		GetFinalUjson = PromptTemplate.from_template("Given The Question Produce a JSON containing Subject Topic Subtopic Level and NumberOfQuestions from the Question Keep the Default value for NumberOfQuestions as 5 if not found in the Question and the rest as empty if not found\n Question: {question}")
 		GetFinalUchain = GetFinalUjson | llm | StrOutputParser()
-		json_withU = GetFinalUchain.invoke({"json":jsonU,"question":udata})
+		json_withU = GetFinalUchain.invoke({"question":udata})
 		check_jsonU = json.loads(json_withU)
+		noqug = check_jsonU["NumberOfQuestions"]
+		ug_ugd = {}
+		for k,v in check_jsonU.items():
+			if v and type(v) == str:
+				ug_ugd[k.lower()] = v
+
 		print(check_jsonU)
+		print(ug_ugd)
+		collections_questionu = c.sahasra_questions.question_bank.find(ug_ugd).limit(noqug)
+		u_questions.extend([dict(ug) for ug in collections_questionu])
+
+		if not u_questions:
+			return "Please Proivde The Right At least Subject for Assessment"
+
+		return u_questions
 		if not check_jsonU["Subject"]:
 			return "Please Provide A Valid Subject,Topic Or SubTopic"
 
