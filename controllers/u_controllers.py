@@ -12,10 +12,12 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.documents import Document
 from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory
+from bson.objectid import ObjectId
 import secrets
 import string
 import datetime
 import json
+import secrets
 
 
 from services.questionbank.mongo.questionbankrepu import insertIntoQuestionsU,CheckifEmailPresent
@@ -26,9 +28,9 @@ import pymongo
 #U_KEYS
 
 c = pymongo.MongoClient("mongodb+srv://chandrakasturi:Bisleri1234@cluster0.ehbe5dz.mongodb.net/",server_api=pymongo.server_api.ServerApi('1'))
-u_openai_api_key = ""
+u_openai_api_key = "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"
 u_supabase_url = "https://uuvgdpvtndnglygvblht.supabase.co"
-u_supabase_api_key = ""
+u_supabase_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1dmdkcHZ0bmRuZ2x5Z3ZibGh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDkxMDkzNTUsImV4cCI6MjAyNDY4NTM1NX0.MNSga3iZ_SnjdUVgxva71uqJJK9S5SFhD0MgJ-_boVs"
 
 #create a splitter
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50) # ["\n\n", "\n", " ", ""] are default values
@@ -53,9 +55,9 @@ def InsertQuestionU(collectionU):
 
 
 def loginU(user,password):
-	rowU = c.sahasra_users.users.find({"$and":[{"username":{"$eq":f"{user}"}},{"password":{"$eq":f"{password}"}}]})
+	rowU = c.sahasra_users.users.find_one({"$and":[{"username":{"$eq":f"{user}"}},{"password":{"$eq":f"{password}"}}]})
 	if rowU:
-		return True
+		return rowU["studentid"]
 	return False
 
 
@@ -81,9 +83,12 @@ def registerU(rModel):
 	print(token)
 	token_dbu = c.sahasra_tokens.register_tokens.find_one({"token":token})
 	print(token_dbu)
+	finalregisterU = dict(rModel)
+	finalregisterU["student_id"] = secrets.token_hex(16)
+
 	if token_dbu and token_dbu["token"] == token:
 		try:
-			_ = c.sahasra_users.users.insert_one(dict(rModel))
+			_ = c.sahasra_users.users.insert_one(finalregisterU)
 			return "User Registered SuccessFully You May Login Now"
 		except Exception as e:
 			print(e)
@@ -161,8 +166,8 @@ def UploadUGVector(file):
 	return vector_ustore
 
 
-
-def AssessUContent(udata,sessionIdu):
+def AssessUContent(udata,sessionIdu,studentid):
+	assesug = {}
 	u_response = {}
 	u_response["response"] = []
 	CheckUprompt = PromptTemplate.from_template("Answer Only AS YES OR NO IN CAPTIALS Answer whether the following statement is Related to this Context: \n Context:{context}\n Statement:{statement}")
@@ -197,6 +202,12 @@ def AssessUContent(udata,sessionIdu):
 		collections_questionu = c.sahasra_questions.question_bank.find(ug_ugd).limit(noqug)
 		u_questions.extend([dict(ug) for ug in collections_questionu])
 
+		assesug["questions"] = []
+		for uqug in u_questions:
+			assesug["questions"].append(uqug["_id"])
+		assesug["issubmit"] = False
+		c[studentid]["assessments"].insert_one(assesug)
+
 		if not u_questions:
 			return "Please Proivde The Right At least Subject for Assessment"
 
@@ -223,6 +234,51 @@ def AssessUContent(udata,sessionIdu):
 		return u_questions
 	u_response["response"].extend([{"text":getUanswer(udata,sessionIdu)[0]},{"images":[ug.data[0]["imageu_uurl"] for ug in ug_topics]},{"videos":[ug.data[0]["videou_uurl"] for ug in ug_topics]},{"formula":[ug.data[0]["u_formula"] for ug in ug_topics]}])
 	return u_response
+
+
+def checkAssessUContent(umodel,studentid):
+	final_assessU = {}
+	ud = []
+	assess_model = dict(umodel)["d"]
+	questionsug_assess = []
+	for ug in assessmentu:
+		questionsug_assess.append(ug["questionid"])
+	for assessmentu in assess_model:
+		questionu = c.sahasra_questions.question_bank.find_one({"_id":ObjectId(assessmentu["questionid"])})
+		studentuanswer = assessmentu["studentanswer"]
+		if studentuanswer == questionu["correctanswer"]:
+			print(final_assessU)
+			final_assessU["total_score"] = final_assessU.get("total_score",0)+ 1
+			final_assessU[questionu["subject"]] = final_assessU.get(questionu["subject"],0) + 1
+			print(f"total scoreug {final_assessU['total_score']}")
+			print(f"subjectug {final_assessU[questionu['subject']]} ")
+			print(f"Question UU {questionu['_id']}")
+			ud.append(str(questionu["_id"]))
+			print(f"final dictu {final_assessU}")
+		else:
+			final_assessU["total_score"] = final_assessU.get("total_score",0)+ 0
+			final_assessU[questionu["subject"]] = final_assessU.get("subject",0) + 0
+	final_assessU["uanswerd"] = ud
+	final_assessU["issubmit"] = True
+	c["studentid"]["assessments"].update_one({"questions":questionsug_assess},{"$set":final_assessU})
+	print(final_assessU)
+	final_assessU.pop("_id")
+	return final_assessU,200
+
+	
+def profileU(studentid):
+	uprofile = c.sahasra_users.users.find_one({"studentid":studentid},{"password":0,"token":0,"_id":0,"studentid":0})
+	if uprofile:
+		return uprofile,200
+	return "No Student Id Found With the Student ID",400
+
+
+def UpdateProfileU(updateUModel,studentid):
+	c.sahasra_users.users.users.update_one({"studentid":studentid},{"$set":dict(updateUModel)})
+	return "Updated Bio SuccessFully",200
+
+
+
 
 
 
