@@ -213,7 +213,7 @@ def AssessUContent(udata,sessionIdu,studentid):
 
 		return u_questions
 		if not check_jsonU["Subject"]:
-			return "Please Provide A Valid Subject,Topic Or SubTopic"
+			return "Please Provide A Valid Subject,Topic Or SubTopic" 
 
 		if not check_jsonU["Topic"] and not check_jsonU["SubTopic"]:
 			collection_questionu = c.sahasra_questions.questionbank.find({"subject":check_jsonU['Subject']})
