@@ -28,9 +28,9 @@ import pymongo
 #U_KEYS
 
 c = pymongo.MongoClient("mongodb+srv://chandrakasturi:Bisleri1234@cluster0.ehbe5dz.mongodb.net/",server_api=pymongo.server_api.ServerApi('1'))
-u_openai_api_key = "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"
+u_openai_api_key = ""
 u_supabase_url = "https://uuvgdpvtndnglygvblht.supabase.co"
-u_supabase_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1dmdkcHZ0bmRuZ2x5Z3ZibGh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDkxMDkzNTUsImV4cCI6MjAyNDY4NTM1NX0.MNSga3iZ_SnjdUVgxva71uqJJK9S5SFhD0MgJ-_boVs"
+u_supabase_api_key = ""
 
 #create a splitter
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50) # ["\n\n", "\n", " ", ""] are default values
@@ -185,14 +185,28 @@ def AssessUContent(udata,sessionIdu,studentid):
 	print(AssessUG)
 	u_questions = []
 	if AssessUG == "YES":
+		ugjson = """{"json":[{"subject":"Biology","topic":"Plants","subtopic":"Plants","NumberOfQuestions":3,"level":2},{"subject":"Physics","topic":"Plants","subtopic":"Plants","NumberOfQuestions":3,"level":2}]}"""
 		jsonU = json.dumps([i for i in c.sahasra_subjectdata.topic_subtopic.find({},{"_id":0})])
 		print(jsonU)
-		GetFinalUjson = PromptTemplate.from_template("Given The Question Produce a JSON containing Subject Topic Subtopic Level and NumberOfQuestions from the Question Keep the Default value for NumberOfQuestions as 5 if not found in the Question and the rest as empty if not found\n Question: {question}")
+		GetFinalUjson = PromptTemplate.from_template("Given The Question Produce a JSON containing a key called questions which contains an array of json which in turn has subject,topic,subtopic,level,NumberOfQuestions for each subject from the Question Keep the Default value for NumberOfQuestions as 5 and Default Level as 1 if not found in the Question and the omit fields from json if not found in the question\n Question: {question}")
 		GetFinalUchain = GetFinalUjson | llm | StrOutputParser()
 		json_withU = GetFinalUchain.invoke({"question":udata})
 		check_jsonU = json.loads(json_withU)
-		noqug = check_jsonU["NumberOfQuestions"]
-		ug_ugd = {}
+		print(f"FINAL JSONUG{json_withU}")
+		for questionug in check_jsonU["questions"]:
+			noqug = questionug["NumberOfQuestions"]
+			_ = questionug.pop("NumberOfQuestions")
+			for k,v in questionug.items():
+				if type(v) == int:
+					questionug[k] = str(v)
+			print(f"FINALUG questionug {questionug}")
+			collections_questionu = c.sahasra_questions.question_bank.find(questionug).limit(noqug)
+			u_questions.extend([dict(ug) for ug in collections_questionu])
+
+
+
+		
+		'''ug_ugd = {}
 		for k,v in check_jsonU.items():
 			if v and type(v) == str:
 				ug_ugd[k.lower()] = v
@@ -200,7 +214,7 @@ def AssessUContent(udata,sessionIdu,studentid):
 		print(check_jsonU)
 		print(ug_ugd)
 		collections_questionu = c.sahasra_questions.question_bank.find(ug_ugd).limit(noqug)
-		u_questions.extend([dict(ug) for ug in collections_questionu])
+		u_questions.extend([dict(ug) for ug in collections_questionu])'''
 
 		assesug["questions"] = []
 		for uqug in u_questions:
@@ -238,34 +252,63 @@ def AssessUContent(udata,sessionIdu,studentid):
 
 def checkAssessUContent(umodel,studentid):
 	final_assessU = {}
+	ug_assessU = {}
+	progress_assessU = []
 	ud = []
 	assess_model = dict(umodel)["d"]
 	questionsug_assess = []
-	for ug in assessmentu:
-		questionsug_assess.append(ug["questionid"])
+	for ug in assess_model:
+		questionsug_assess.append(ObjectId(ug["questionid"]))
 	for assessmentu in assess_model:
 		questionu = c.sahasra_questions.question_bank.find_one({"_id":ObjectId(assessmentu["questionid"])})
+		if not final_assessU.get(questionu['subject'],None):
+			final_assessU[questionu["subject"]] = {"score":0,"questions":0}
 		studentuanswer = assessmentu["studentanswer"]
 		if studentuanswer == questionu["correctanswer"]:
 			print(final_assessU)
-			final_assessU["total_score"] = final_assessU.get("total_score",0)+ 1
+			final_assessU[questionu["subject"]]["score"] = final_assessU[questionu["subject"]]["score"]+1
+			final_assessU[questionu["subject"]]["questions"] = final_assessU[questionu['subject']]["questions"]+1
+			progress_assessU.append(final_assessU[questionu['subject']])
+			'''final_assessU["total_score"] = final_assessU.get("total_score",0)+ 1
 			final_assessU[questionu["subject"]] = final_assessU.get(questionu["subject"],0) + 1
 			print(f"total scoreug {final_assessU['total_score']}")
 			print(f"subjectug {final_assessU[questionu['subject']]} ")
-			print(f"Question UU {questionu['_id']}")
+			print(f"Question UU {questionu['_id']}")'''
 			ud.append(str(questionu["_id"]))
 			print(f"final dictu {final_assessU}")
 		else:
-			final_assessU["total_score"] = final_assessU.get("total_score",0)+ 0
-			final_assessU[questionu["subject"]] = final_assessU.get("subject",0) + 0
-	final_assessU["uanswerd"] = ud
-	final_assessU["issubmit"] = True
-	c["studentid"]["assessments"].update_one({"questions":questionsug_assess},{"$set":final_assessU})
-	print(final_assessU)
-	final_assessU.pop("_id")
-	return final_assessU,200
-
+			final_assessU[questionu["subject"]]["questions"] = final_assessU[questionu['subject']]["questions"]+1
+	ug_assessU["progress"] = final_assessU
+	ug_assessU["uanswerd"] = ud
+	ug_assessU["issubmit"] = True
 	
+	c[studentid]["assessments"].update_one({"questions":questionsug_assess},{"$set":ug_assessU},upsert=True)
+
+	assesug_response = []
+	for ug in questionsug_assess:
+		questionug = c.sahasra_questions.question_bank.find_one({"_id":ug})
+		assesug_response.append(questionug)
+	print(final_assessU)
+	return assesug_response,200
+
+def getAssessmentsU(studentid):
+	assessmentsUg = [ug for ug in c[studentid]["assessments"].find()]
+	return assessmentsUg,200
+
+def fetchAssessmentU(studentid,assessmentid):
+	assessquestionug = []
+	questionsu = c[studentid]["assessments"].find_one({"_id":ObjectId(assessmentid)},{"questions":1})
+	print(questionsu)
+	for ug in questionsu["questions"]:
+		print(f"UGUGUGUUGUGUGGGGGGGGGG{ug}")
+		questionassessug = c.sahasra_questions.question_bank.find_one({"_id":ug},{"correctanswer":0})
+		assessquestionug.append(questionassessug)
+	print(f"ASSESSUMENTSUG {assessquestionug}")
+	return assessquestionug,200
+
+
+
+
 def profileU(studentid):
 	uprofile = c.sahasra_users.users.find_one({"studentid":studentid},{"password":0,"token":0,"_id":0,"studentid":0})
 	if uprofile:
@@ -273,8 +316,9 @@ def profileU(studentid):
 	return "No Student Id Found With the Student ID",400
 
 
+
 def UpdateProfileU(updateUModel,studentid):
-	c.sahasra_users.users.users.update_one({"studentid":studentid},{"$set":dict(updateUModel)})
+	c.sahasra_users.users.update_one({"studentid":studentid},{"$set":dict(updateUModel)})
 	return "Updated Bio SuccessFully",200
 
 
