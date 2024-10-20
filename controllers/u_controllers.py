@@ -58,7 +58,7 @@ def InsertQuestionU(collectionU):
 
 
 def loginU(user,password):
-	rowU = c.sahasra_users.users.find_one({"$and":[{"$or":[{"email":{"$eq":f"{user}"}},{"mobilenumber":{"$eq":f"{user}"}}]},{"password":{"$eq":f"{password}"}}]})
+	rowU = c.sahasra_users.users.find_one({"$and":[{"$or":[{"email":{"$eq":f"{user.lower()}"}},{"mobilenumber":{"$eq":f"{user}"}}]},{"password":{"$eq":f"{password}"}}]})
 	if rowU:
 		return rowU["student_id"]
 	return False
@@ -66,10 +66,10 @@ def loginU(user,password):
 
 def beforeRegisterU(nModel):
 	print(dict(nModel))
-	emailU = dict(nModel)["email"]
+	emailU = dict(nModel)["email"].lower()
 	mobile = dict(nModel)["phonenumber"]
 	fModelU = dict(nModel)
-	token = ''.join([secrets.choice(string.ascii_uppercase+string.digits) for i in range(6)])
+	token = ''.join([secrets.choice(string.digits) for i in range(6)])
 	emailTakenU = CheckifEmailPresent(c,emailU,mobileno=mobile)
 	if not emailTakenU:
 		fModelU["token"] = token
@@ -94,7 +94,7 @@ def registerU(rModel):
 	token_dbu = c.sahasra_tokens.register_tokens.find_one({"token":token})
 	print(token_dbu)
 	finalregisterU = dict(rModel)
-	finalregisterU["student_id"] = secrets.token_hex(16)
+	finalregisterU["student_id"] = ugstudentid
 
 	if token_dbu and token_dbu["token"] == token:
 		try:
@@ -117,13 +117,13 @@ def registerU(rModel):
 
 def forgotPasswordU(forgotuModel):
 	emailU = dict(forgotuModel)["mobilenumberoremail"]
-	token = ''.join([secrets.choice(string.ascii_uppercase+string.digits) for i in range(6)])
+	token = ''.join([secrets.choice(string.digits) for i in range(6)])
 	emailTakenU = CheckifEmailPresent(c,emailU)
 	if emailTakenU:
 		c.sahasra_tokens.password_tokens.create_index("ExpiresAt",expireAfterSeconds=10*60*60)
 		c.sahasra_tokens.password_tokens.insert_one({"email":emailTakenU,"token":token,"ExpiresAt":datetime.datetime.utcnow()})
 		try:
-			if phone_ugregex.match(emailTakenU):
+			if not phone_ugregex.match(emailTakenU):
 				send_email(emailTakenU,token)
 			else:
 				send_phoneNumberU(emailTakenU,token)
@@ -186,7 +186,7 @@ def UploadUGImageUUrl(file):
 def UploadUGVector(file):
 	textug_splitter = RecursiveCharacterTextSplitter(chunk_size=len(file),chunk_overlap=0)
 	u_text = textug_splitter.create_documents([str(file)])
-	vector_ustore = SupabaseVectorStore.from_documents(u_text,openai_uembeddings,client=supabase_uclient,table_name="biology")
+	vector_ustore = SupabaseVectorStore.from_documents(u_text,openai_uembeddings,client=supabase_uclient,table_name="history")
 	return vector_ustore
 
 
@@ -199,11 +199,11 @@ def AssessUContent(udata,sessionIdu,studentid):
 	u_response["response"] = []
 	CheckUprompt = PromptTemplate.from_template("Answer Only AS YES OR NO IN CAPTIALS Answer whether the following statement is Related to this Context: \n Context:{context}\n Statement:{statement}")
 	checkuChain = CheckUprompt | llm | StrOutputParser()
-	AssessUG = checkuChain.invoke({"context":"Question me on ,Ask me a few questions,Assess me on ,Give me a few questions on","statement":udata})
+	AssessUG = checkuChain.invoke({"context":"Question me,Ask me ,Assess me","statement":udata})
 
 
 
-	ug_page_content = [u.page_content for u in retrieveru_from_llm.get_relevant_documents(query=udata)]
+	'''ug_page_content = [u.page_content for u in retrieveru_from_llm.get_relevant_documents(query=udata)]'''
 	'''ug_topics = [supabase_uclient.table("science").select("topic,subtopic,imageu_uurl,videou_uurl,u_formula").eq('content',u).execute() for u in ug_page_content]
 	print("HEREEEEEEEEEEEE")
 	print(ug_topics)
@@ -438,13 +438,22 @@ def getUanswer(data,sessionIdu,studentid):
 	print(questionUchain)
 	generatedUquestion = questionUchain.invoke({"udata":data}) # a second invoke before main uinvoke bad way will change
 	print(generatedUquestion)'''
+	subjectugTemplate = "Given the Statment Reply with a valid JSON with the key as subject Which subject this statement Belongs to Given the subjects Array \n Subjects:{subjects},Statement:{statement}"	
+	subjectugPrompt = PromptTemplate.from_template(subjectugTemplate)
+	subjectugchain = subjectugPrompt | llm | StrOutputParser()
+	jsonug = subjectugchain.invoke({"subjects":"['history','biology']","statement":data})
+	print(f"THIS IS SUBJECTUG {jsonug}")
+	ugsubject = json.loads(jsonug)["subject"]
+	ugsubject_vecstore = SupabaseVectorStore(embedding=openai_uembeddings,client=supabase_uclient,query_name=f"match_{ugsubject}",table_name=f"{ugsubject}")
+	s_u = ugsubject_vecstore.as_retriever()
+	retrieverugsubject_from_llm = MultiQueryRetriever.from_llm(retriever=s_u,llm=llm)
 	standaloneTemplate = "Give the appropiate Formulas in Latex and Please Provide Related Image Urls In Between Your Answer appropriately as Markdown From the Context To the Question and Answer the Question with the references and Image urls only on the following context If The Question is Not Related to The Context Act As Usual\n Context: {context}\n\n"
 	chatGeneratedUTemplate = ChatPromptTemplate.from_messages([("system",standaloneTemplate),MessagesPlaceholder(variable_name="history"),("human","Question: {question}")])
 	#standalonePrompt = PromptTemplate.from_template(standaloneTemplate)
-	ug_page_content = [u.page_content for u in retrieveru_from_llm.get_relevant_documents(query=data)]
+	ug_page_content = [u.page_content for u in retrieverugsubject_from_llm.get_relevant_documents(query=data)]
 	'''ug_topics = [supabase_uclient.table("science").select("topic,subtopic").eq('content',u).execute() for u in ug_page_content]
 	print(ug_topics)'''
-	metaDatau = [u.metadata for u in retrieveru_from_llm.get_relevant_documents(query=data)]
+	'''metaDatau = [u.metadata for u in retrieveru_from_llm.get_relevant_documents(query=data)]'''
 	retriever = "".join(ug_page_content)
 	standAloneChain =  chatGeneratedUTemplate | ug_llm | StrOutputParser()
 	standAloneUChainWithHistory = RunnableWithMessageHistory(standAloneChain,lambda sessionIdu: MongoDBChatMessageHistory(session_id=sessionIdu,connection_string="mongodb+srv://chandrakasturi:Bisleri1234@cluster0.ehbe5dz.mongodb.net/",database_name=studentid,collection_name="history"),input_messages_key="question",history_messages_key="history")
@@ -456,7 +465,7 @@ def getUanswer(data,sessionIdu,studentid):
 	ugChain = ugprompt | llm | StrOutputParser()
 	ugImagesVidoes = ugChain.invoke({"context":finalug})
 	print(F"THIS IS UGGUGUGUGUGUGUGUGUGUGGUGUGUGGUGGUGUGUGUGUGUG UGUGGU {ugImagesVidoes}")'''
-	return finalug,{"images":['https://www.sahasra.ai/class_X/Biology/Life_processes/Binary_Fission_Ameboa.PNG'],"videos":["https://www.sahasra.ai/class_X/Biology/Life_processes/Binary_Fission_Ameboa.PNG"]}
+	return finalug,{"images":[],"videos":[]}
 
 
 def getUtranslate(data):
