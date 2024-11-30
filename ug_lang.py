@@ -26,7 +26,7 @@ app.add_middleware(
 )
 
 
-c = pymongo.MongoClient("mongodb+srv://chandrakasturi:Bisleri1234@cluster0.ehbe5dz.mongodb.net/",server_api=pymongo.server_api.ServerApi('1'))
+c = pymongo.MongoClient("mongodb://test:testug@localhost/")
 class UGJSONResponse(JSONResponse):
 	media_type = "application/json"
 
