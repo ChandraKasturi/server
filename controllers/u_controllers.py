@@ -32,7 +32,7 @@ import pymongo
 #U_KEYS
 phone_ugregex = re.compile(r"[0-9]+$")
 c = pymongo.MongoClient("mongodb://test:testug@localhost/")
-u_openai_api_key = "-8v5huYC_6cjaoZ9Hxn_kJCWfhBIWdFIA"
+u_openai_api_key = ""
 u_supabase_url = "https://uuvgdpvtndnglygvblht.supabase.co"
 u_supabase_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1dmdkcHZ0bmRuZ2x5Z3ZibGh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDkxMDkzNTUsImV4cCI6MjAyNDY4NTM1NX0.MNSga3iZ_SnjdUVgxva71uqJJK9S5SFhD0MgJ-_boVs"
 
