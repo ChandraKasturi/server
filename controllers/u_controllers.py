@@ -14,13 +14,15 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.documents import Document
 from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory
 from bson.objectid import ObjectId
+from connections.pgvector import PostgresVectorStore
+from langchain_postgres.vectorstores import PGVector
 import secrets
 import string
 import datetime
 import dateutil
 import json
 import secrets
-
+import uuid
 
 from services.questionbank.mongo.questionbankrepu import insertIntoQuestionsU,CheckifEmailPresent
 from services.questionbank.mongo.emailserviceu import register_phoneNumberU, send_email,register_email, send_phoneNumberU
@@ -29,10 +31,10 @@ import pymongo
 
 #U_KEYS
 phone_ugregex = re.compile(r"[0-9]+$")
-c = pymongo.MongoClient("mongodb+srv://chandrakasturi:Bisleri1234@cluster0.ehbe5dz.mongodb.net/",server_api=pymongo.server_api.ServerApi('1'))
-u_openai_api_key = ""
+c = pymongo.MongoClient("mongodb://test:testug@localhost/")
+u_openai_api_key = "-8v5huYC_6cjaoZ9Hxn_kJCWfhBIWdFIA"
 u_supabase_url = "https://uuvgdpvtndnglygvblht.supabase.co"
-u_supabase_api_key = ""
+u_supabase_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1dmdkcHZ0bmRuZ2x5Z3ZibGh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDkxMDkzNTUsImV4cCI6MjAyNDY4NTM1NX0.MNSga3iZ_SnjdUVgxva71uqJJK9S5SFhD0MgJ-_boVs"
 
 #create a splitter
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50) # ["\n\n", "\n", " ", ""] are default values
@@ -172,7 +174,7 @@ def getUimageuurl(ucontext):
 
 
 def UploadUGImageUUrl(file):
-	text_image_usplitter = CharacterTextSplitter(chunk_size=10,chunk_overlap=0,separator="\n") # need it store a valid image uurl
+	text_image_usplitter = CharacterTextSplitter(chunk_size=100,chunk_overlap=10,separator="\n") # need it store a valid image uurl
 	file_ubytes_uimg = open(file,"rb").read()
 	u_text_uimg = text_image_usplitter.create_documents([str(file_ubytes_uimg)])
 	print(u_text_uimg)
@@ -183,11 +185,26 @@ def UploadUGImageUUrl(file):
 
 
 
-def UploadUGVector(file):
+def UploadUGVector(file,subject):
 	textug_splitter = RecursiveCharacterTextSplitter(chunk_size=len(file),chunk_overlap=0)
 	u_text = textug_splitter.create_documents([str(file)])
-	vector_ustore = SupabaseVectorStore.from_documents(u_text,openai_uembeddings,client=supabase_uclient,table_name="history")
-	return vector_ustore
+	'''DB_PARAMS = {
+    'dbname': 'x_cbse',
+    'user': 'myuser',
+    'password': 'mypassword',
+    'host': 'localhost',  # or your host
+    'port': '5432'        # default PostgreSQL port
+	}
+	vector_store = PostgresVectorStore(DB_PARAMS, str(subject).lower(),u_openai_api_key)'''
+	vector_store = PGVector(
+    	embeddings=openai_uembeddings,
+    	collection_name=subject,
+    	connection="postgresql+psycopg://myuser:mypassword@localhost:5432/x_cbse",
+    	use_jsonb=True,
+	)
+	print(u_text[0].metadata)
+	vector_store.add_documents(u_text,ids=[str(uuid.uuid4()) for doc in u_text])
+	return "Done"
 
 
 def AssessUContent(udata,sessionIdu,studentid):
@@ -197,9 +214,9 @@ def AssessUContent(udata,sessionIdu,studentid):
 	assesug = {}
 	u_response = {}
 	u_response["response"] = []
-	CheckUprompt = PromptTemplate.from_template("Answer Only AS YES OR NO IN CAPTIALS Answer whether the following statement is Related to this Context: \n Context:{context}\n Statement:{statement}")
+	CheckUprompt = PromptTemplate.from_template("Answer Only AS YES OR NO IN CAPTIALS Answer whether the following statement is Strictly  Related to this Context: \n Context:{context}\n Statement:{statement}")
 	checkuChain = CheckUprompt | llm | StrOutputParser()
-	AssessUG = checkuChain.invoke({"context":"Question me,Ask me ,Assess me","statement":udata})
+	AssessUG = checkuChain.invoke({"context":"Question me,Ask me ,Assess me Evaluate me,Examine me, Test me, Analyze me","statement":udata})
 
 
 
@@ -441,22 +458,41 @@ def getUanswer(data,sessionIdu,studentid):
 	subjectugTemplate = "Given the Statment Reply with a valid JSON with the key as subject Which subject this statement Belongs to Given the subjects Array \n Subjects:{subjects},Statement:{statement}"	
 	subjectugPrompt = PromptTemplate.from_template(subjectugTemplate)
 	subjectugchain = subjectugPrompt | llm | StrOutputParser()
-	jsonug = subjectugchain.invoke({"subjects":"['history','biology']","statement":data})
+	jsonug = subjectugchain.invoke({"subjects":"['biology','english]","statement":data})
 	print(f"THIS IS SUBJECTUG {jsonug}")
-	ugsubject = json.loads(jsonug)["subject"]
-	ugsubject_vecstore = SupabaseVectorStore(embedding=openai_uembeddings,client=supabase_uclient,query_name=f"match_{ugsubject}",table_name=f"{ugsubject}")
+	ugsubject = json.loads(jsonug)["subject"].lower()
+	'''ugsubject_vecstore = SupabaseVectorStore(embedding=openai_uembeddings,client=supabase_uclient,query_name=f"match_{ugsubject}",table_name=f"{ugsubject}")
 	s_u = ugsubject_vecstore.as_retriever()
-	retrieverugsubject_from_llm = MultiQueryRetriever.from_llm(retriever=s_u,llm=llm)
+	retrieverugsubject_from_llm = MultiQueryRetriever.from_llm(retriever=s_u,llm=llm)'''
 	standaloneTemplate = "Give the appropiate Formulas in Latex and Please Provide Related Image Urls In Between Your Answer appropriately as Markdown From the Context To the Question and Answer the Question with the references and Image urls only on the following context If The Question is Not Related to The Context Act As Usual\n Context: {context}\n\n"
 	chatGeneratedUTemplate = ChatPromptTemplate.from_messages([("system",standaloneTemplate),MessagesPlaceholder(variable_name="history"),("human","Question: {question}")])
 	#standalonePrompt = PromptTemplate.from_template(standaloneTemplate)
-	ug_page_content = [u.page_content for u in retrieverugsubject_from_llm.get_relevant_documents(query=data)]
+	'''DB_PARAMS = {
+    'dbname': 'x_cbse',
+    'user': 'myuser',
+    'password': 'mypassword',
+    'host': 'localhost',  # or your host
+    'port': '5432'        # default PostgreSQL port
+	}
+	vector_store = PostgresVectorStore(DB_PARAMS, ugsubject,u_openai_api_key)
+	query_vector = vector_store.embeddings.embed_documents([data])[0]
+	print(f"QUERY VECTOR {query_vector}")
+	ug_page_content = [u[1] for u in vector_store.search(query_vector,1)]'''
+	vector_store = PGVector(
+   	 embeddings=openai_uembeddings,
+   	 collection_name=ugsubject,
+    	connection="postgresql+psycopg://myuser:mypassword@localhost:5432/x_cbse",
+    	use_jsonb=True,
+	)
+	retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 1})
+	ug_page_content = [doc.page_content for doc in retriever.invoke(data)]
 	'''ug_topics = [supabase_uclient.table("science").select("topic,subtopic").eq('content',u).execute() for u in ug_page_content]
 	print(ug_topics)'''
 	'''metaDatau = [u.metadata for u in retrieveru_from_llm.get_relevant_documents(query=data)]'''
-	retriever = "".join(ug_page_content)
+	print(f"RETRIEV {ug_page_content}")
+	retriever = "\n".join(ug_page_content)
 	standAloneChain =  chatGeneratedUTemplate | ug_llm | StrOutputParser()
-	standAloneUChainWithHistory = RunnableWithMessageHistory(standAloneChain,lambda sessionIdu: MongoDBChatMessageHistory(session_id=sessionIdu,connection_string="mongodb+srv://chandrakasturi:Bisleri1234@cluster0.ehbe5dz.mongodb.net/",database_name=studentid,collection_name="history"),input_messages_key="question",history_messages_key="history")
+	standAloneUChainWithHistory = RunnableWithMessageHistory(standAloneChain,lambda sessionIdu: MongoDBChatMessageHistory(session_id=sessionIdu,connection_string="mongodb://test:testug@localhost/",database_name=studentid,collection_name="history"),input_messages_key="question",history_messages_key="history")
 	config = {"configurable":{"session_id":sessionIdu}}
 	print(f"THIS IS UG CONTEXT {retriever}")
 	finalug = standAloneUChainWithHistory.invoke({"question":data,"context":retriever},config=config)
