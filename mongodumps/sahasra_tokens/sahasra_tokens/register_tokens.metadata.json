@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"ExpiresAt":{"$numberInt":"1"}},"name":"ExpiresAt_1","expireAfterSeconds":{"$numberInt":"36000"}}],"uuid":"740f03e5ae3c4b779330edc729fe6f2b","collectionName":"register_tokens","type":"collection"}
