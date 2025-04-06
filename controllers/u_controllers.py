@@ -4,6 +4,7 @@ from supabase.client import create_client
 from langchain_text_splitters import CharacterTextSplitter,RecursiveCharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.vectorstores import SupabaseVectorStore
 from langchain_core.prompts import ChatPromptTemplate,PromptTemplate
 from langchain_core.prompts import MessagesPlaceholder
@@ -23,7 +24,9 @@ import dateutil
 import json
 import secrets
 import uuid
-
+import mdtex2html
+from PIL import Image
+from io import BytesIO
 from services.questionbank.mongo.questionbankrepu import insertIntoQuestionsU,CheckifEmailPresent
 from services.questionbank.mongo.emailserviceu import register_phoneNumberU, send_email,register_email, send_phoneNumberU
 
@@ -32,10 +35,10 @@ import pymongo
 #U_KEYS
 phone_ugregex = re.compile(r"[0-9]+$")
 c = pymongo.MongoClient("mongodb://test:testug@localhost/")
-u_openai_api_key = ""
+u_openai_api_key = "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"
 u_supabase_url = "https://uuvgdpvtndnglygvblht.supabase.co"
 u_supabase_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1dmdkcHZ0bmRuZ2x5Z3ZibGh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDkxMDkzNTUsImV4cCI6MjAyNDY4NTM1NX0.MNSga3iZ_SnjdUVgxva71uqJJK9S5SFhD0MgJ-_boVs"
-
+u_google_api_key = "AIzaSyAjjl_TB5PwWf6Ceg1avdftx7ljwTLvUQ8"
 #create a splitter
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50) # ["\n\n", "\n", " ", ""] are default values
 openai_uembeddings = OpenAIEmbeddings(openai_api_key=u_openai_api_key)
@@ -43,6 +46,8 @@ supabase_uclient = create_client(u_supabase_url,u_supabase_api_key)
 #creating llm
 llm = ChatOpenAI(openai_api_key=u_openai_api_key)
 ug_llm = ChatOpenAI(openai_api_key=u_openai_api_key,model="gpt-4o")
+'''llm = ChatGoogleGenerativeAI(google_api_key=u_google_api_key,model="gemini-1.5-pro")
+ug_llm = ChatGoogleGenerativeAI(google_api_key=u_google_api_key,model="gemini-1.5-pro")'''
 #creating retriever u_context
 u_vecstore = SupabaseVectorStore(embedding=openai_uembeddings,client=supabase_uclient,query_name="match_subject",table_name="biology")
 u_vecstore_uimageuurl = SupabaseVectorStore(embedding=openai_uembeddings,client=supabase_uclient,query_name="match_u_image_uurl",table_name="uimageurl")
@@ -101,14 +106,14 @@ def registerU(rModel):
 	if token_dbu and token_dbu["token"] == token:
 		try:
 			_ = c.sahasra_users.users.insert_one(finalregisterU)
-			return "User Registered SuccessFully You May Login Now",ugstudentid
+			return "User Registered SuccessFully You May Login Now",ugstudentid,200
 		except Exception as e:
 			print(e)
-			return "Something Went Wrong",""
+			return "Something Went Wrong","",400
 	elif token_dbu and token_dbu["token"] != token:
-		return "Wrong Token",""
+		return "Wrong Token","",400
 	else:
-		return "Token Expired Try againU",""
+		return "Token Expired Try againU","",400
 	'''emailU = dict(rModel).email
 	rowU = c.sahasra_users.users.find({"$or":[{"username":{"$eq":dict(rModel).username}},{"email":{"$eq":dict(rModel).email}}]})
 	if rowU != 1:
@@ -149,8 +154,14 @@ def updatePasswordU(password,token):
 	else:
 		return "Token Expired Try againU",400
 
-
-
+def addFeedBackU(studentid,feedback):
+	feedbackug = {"Date":datetime.datetime.utcnow(),"FeedBack":feedback}
+	try:
+		_ = c[studentid]["feedback"].insert_one(feedbackug)
+		return "FeedBack Recieved SuccessFully",200
+	except Exception as e:
+		print(e)
+		return "Something Went Wrong",400
 
 def fetchHistoryU(studentid,time):
 	try:
@@ -199,7 +210,7 @@ def UploadUGVector(file,subject):
 	vector_store = PGVector(
     	embeddings=openai_uembeddings,
     	collection_name=subject,
-    	connection="postgresql+psycopg://myuser:mypassword@localhost:5432/x_cbse",
+    	connection="postgresql+psycopg://myuser:mypassword@localhost:5432/cbse_x",
     	use_jsonb=True,
 	)
 	print(u_text[0].metadata)
@@ -214,10 +225,9 @@ def AssessUContent(udata,sessionIdu,studentid):
 	assesug = {}
 	u_response = {}
 	u_response["response"] = []
-	CheckUprompt = PromptTemplate.from_template("Answer Only AS YES OR NO IN CAPTIALS Answer whether the following statement is Strictly  Related to this Context: \n Context:{context}\n Statement:{statement}")
+	CheckUprompt = PromptTemplate.from_template("Answer Only AS YES OR NO IN CAPTIALS Answer whether the following statement contains the  word  case insensitive 'Assessment' : \n Statement:{statement}")
 	checkuChain = CheckUprompt | llm | StrOutputParser()
-	AssessUG = checkuChain.invoke({"context":"Question me,Ask me ,Assess me Evaluate me,Examine me, Test me, Analyze me","statement":udata})
-
+	AssessUG = checkuChain.invoke({"statement":udata})
 
 
 	'''ug_page_content = [u.page_content for u in retrieveru_from_llm.get_relevant_documents(query=udata)]'''
@@ -234,10 +244,12 @@ def AssessUContent(udata,sessionIdu,studentid):
 		ugjson = """{"json":[{"subject":"Biology","topic":"Plants","subtopic":"Plants","NumberOfQuestions":3,"level":2},{"subject":"Physics","topic":"Plants","subtopic":"Plants","NumberOfQuestions":3,"level":2}]}"""
 		jsonU = json.dumps([i for i in c.sahasra_subjectdata.topic_subtopic.find({},{"_id":0})])
 		print(jsonU)
-		GetFinalUjson = PromptTemplate.from_template("Given The Question Produce a correct JSON containing a key called questions which contains an array of json which in turn has subject,topic,subtopic,level,NumberOfQuestions for each subject from the Question Keep the Default value for NumberOfQuestions as 5 and Default Level as 1 if not found in the Question and the omit and remove fields from json if not found in the question\n Question: {question}")
+		GetFinalUjson = PromptTemplate.from_template("Given The Question Produce a correct JSON containing a key called questions which contains an array of json which in turn has subject,topic,subtopic,level,NumberOfQuestions for each subject from the Question Keep the Default value for NumberOfQuestions as 5 and Default Level as 1 if not found in the Question and the omit and remove fields and remove the keys too from json do not keep them as empty or null if not found in the question remove the fields and keys completely\n Question: {question}")
 		GetFinalUchain = GetFinalUjson | llm | StrOutputParser()
 		json_withU = GetFinalUchain.invoke({"question":udata})
 		print(f"FINAL JSONUGUGUGST{json_withU}")
+		if "```json" in json_withU:
+			json_withU = json_withU[7:-4]
 		check_jsonU = json.loads(json_withU)
 		print(f"FINAL JSONUG{json_withU}")
 		for questionug in check_jsonU["questions"]:
@@ -246,6 +258,7 @@ def AssessUContent(udata,sessionIdu,studentid):
 			for k,v in questionug.items():
 				if type(v) == int:
 					questionug[k] = str(v)
+				questionug[k] = str(v).lower()
 			print(f"FINALUG questionug {questionug}")
 
 			collections_questionu = c.sahasra_questions.question_bank.find(questionug).limit(noqug)
@@ -434,6 +447,63 @@ def UpdateProfileU(updateUModel,studentid):
 	return "Updated Bio SuccessFully",200
 
 
+def GetProfileImageU(studentid):
+	try:
+		path = f"static/images/{studentid}/{studentid}.png"
+		if os.path.exists(path):
+			return "https://aigenix.in/static/"+f"images/{studentid}/{studentid}.png",200
+	
+		if os.path.exists(f"static/images/{studentid}"):
+			f = open("defaultug.png","rb").read()
+			with open(path,"wb") as ug:
+				ug.write(f)
+			return "https://aigenix.in/static/"+f"images/{studentid}/{studentid}.png",200
+		else:
+			print("HERE UG")
+			os.mkdir(f"static/images/{studentid}")
+			f = open("defaultug.png","rb").read()
+			print(f"DFFDFF {f}")
+			with open(path,"wb") as ug:
+				ug.write(f)
+			return "https://aigenix.in/static/"+f"images/{studentid}/{studentid}.png",200
+	except Exception as e:
+		print(e)
+		return "Something Went Wrong",400
+
+
+			
+
+
+
+async def UpdateProfileImageU(studentid,file):
+	fileug = await file.read()
+	try:
+		with Image.open(BytesIO(fileug)) as img:
+			if img.format == "PNG":
+				img.verify()
+			else:
+				return "Only PNG images allowed",400
+	except Exception as e:
+		print(e)
+		return "Not a Valid PNG Image",400
+
+	path = f"static/images/{studentid}/"
+	if not os.path.exists(path):
+		try:
+			os.mkdir(path)
+		except Exception as e:
+			print(e)
+			return "Something Went Wrong",400
+	try:
+		with open(path+f"{studentid}.png","wb") as f:
+			f.write(fileug)
+		return "https://aigenix.in/static/"+f"images/{studentid}/{studentid}.png",200
+	except Exception as e:
+		print(e)
+		return "Something Went Wrong",400
+	
+
+
 
 
 
@@ -455,16 +525,17 @@ def getUanswer(data,sessionIdu,studentid):
 	print(questionUchain)
 	generatedUquestion = questionUchain.invoke({"udata":data}) # a second invoke before main uinvoke bad way will change
 	print(generatedUquestion)'''
-	subjectugTemplate = "Given the Statment Reply with a valid JSON with the key as subject Which subject this statement Belongs to Given the subjects Array \n Subjects:{subjects},Statement:{statement}"	
+	'''subjectugTemplate = "Given the Statment Reply with a valid JSON with the key as subject Which subject this statement Belongs to Given the subjects Array \n Subjects:{subjects},Statement:{statement}"	
 	subjectugPrompt = PromptTemplate.from_template(subjectugTemplate)
 	subjectugchain = subjectugPrompt | llm | StrOutputParser()
-	jsonug = subjectugchain.invoke({"subjects":"['biology','english]","statement":data})
+	jsonug = subjectugchain.invoke({"subjects":"['english','socialscience','science']","statement":data})
 	print(f"THIS IS SUBJECTUG {jsonug}")
-	ugsubject = json.loads(jsonug)["subject"].lower()
+	ugsubject = json.loads(jsonug)["subject"].lower()'''
+	ugsubject = "class_x"
 	'''ugsubject_vecstore = SupabaseVectorStore(embedding=openai_uembeddings,client=supabase_uclient,query_name=f"match_{ugsubject}",table_name=f"{ugsubject}")
 	s_u = ugsubject_vecstore.as_retriever()
 	retrieverugsubject_from_llm = MultiQueryRetriever.from_llm(retriever=s_u,llm=llm)'''
-	standaloneTemplate = "Give the appropiate Formulas in Latex and Please Provide Related Image Urls In Between Your Answer appropriately as Markdown From the Context To the Question and Answer the Question with the references and Image urls only on the following context If The Question is Not Related to The Context Act As Usual\n Context: {context}\n\n"
+	standaloneTemplate = "Give the appropiate Formulas in Latex and Please Provide Related Image Urls AS image MARKDOWN only from https://sahasra.ai and only if its in the given CONTEXT do not create your own images if no related images to the questions are present do not give any image urls domain In Between Your Answer appropriately as Markdown From the Context To the Question and Answer the Question with the references and Image urls in  the following context \n Context: {context}\n\n"
 	chatGeneratedUTemplate = ChatPromptTemplate.from_messages([("system",standaloneTemplate),MessagesPlaceholder(variable_name="history"),("human","Question: {question}")])
 	#standalonePrompt = PromptTemplate.from_template(standaloneTemplate)
 	'''DB_PARAMS = {
@@ -481,18 +552,19 @@ def getUanswer(data,sessionIdu,studentid):
 	vector_store = PGVector(
    	 embeddings=openai_uembeddings,
    	 collection_name=ugsubject,
-    	connection="postgresql+psycopg://myuser:mypassword@localhost:5432/x_cbse",
+    	connection="postgresql+psycopg://myuser:mypassword@localhost:5432/cbse_x",
     	use_jsonb=True,
 	)
 	retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 1})
-	ug_page_content = [doc.page_content for doc in retriever.invoke(data)]
+	ug_ugu = retriever.invoke(data)
+	ug_page_content = [doc.page_content for doc in ug_ugu]
 	'''ug_topics = [supabase_uclient.table("science").select("topic,subtopic").eq('content',u).execute() for u in ug_page_content]
 	print(ug_topics)'''
 	'''metaDatau = [u.metadata for u in retrieveru_from_llm.get_relevant_documents(query=data)]'''
 	print(f"RETRIEV {ug_page_content}")
 	retriever = "\n".join(ug_page_content)
 	standAloneChain =  chatGeneratedUTemplate | ug_llm | StrOutputParser()
-	standAloneUChainWithHistory = RunnableWithMessageHistory(standAloneChain,lambda sessionIdu: MongoDBChatMessageHistory(session_id=sessionIdu,connection_string="mongodb://test:testug@localhost/",database_name=studentid,collection_name="history"),input_messages_key="question",history_messages_key="history")
+	standAloneUChainWithHistory = RunnableWithMessageHistory(standAloneChain,lambda sessionIdu: MongoDBChatMessageHistory(session_id=sessionIdu,connection_string="mongodb://test:testug@localhost/",database_name=studentid,collection_name="history",history_size=2),input_messages_key="question",history_messages_key="history")
 	config = {"configurable":{"session_id":sessionIdu}}
 	print(f"THIS IS UG CONTEXT {retriever}")
 	finalug = standAloneUChainWithHistory.invoke({"question":data,"context":retriever},config=config)
@@ -501,7 +573,7 @@ def getUanswer(data,sessionIdu,studentid):
 	ugChain = ugprompt | llm | StrOutputParser()
 	ugImagesVidoes = ugChain.invoke({"context":finalug})
 	print(F"THIS IS UGGUGUGUGUGUGUGUGUGUGGUGUGUGGUGGUGUGUGUGUGUG UGUGGU {ugImagesVidoes}")'''
-	return finalug,{"images":[],"videos":[]}
+	return mdtex2html.convert(finalug),{"images":[],"videos":[]}
 
 
 def getUtranslate(data):

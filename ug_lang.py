@@ -1,21 +1,26 @@
 import datetime
+import uuid
 from fastapi.middleware.cors import CORSMiddleware
 import time
 from langchain.schema import Document
 from fastapi import FastAPI,Request,Response,Depends,HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from controllers.u_controllers import UploadUGVector, fetchAssessmentU, fetchHistoryU, getAssessmentsU,getUtweet,getUanswer,getUtranslate,UploadUGImageUUrl,getUimageuurl,AssessUContent,InsertQuestionU,loginU,registerU,forgotPasswordU,updatePasswordU,beforeRegisterU,checkAssessUContent,profileU,UpdateProfileU
-from models.u_models import UpdatePasswordUmodel, uTweet,uAnswer,ucorrect,QuestionUmodel,loginUmodel,registerUmodel,ForgotPasswordUmodel,confirmRegisterUmodel,AssessUmodel,ProfileUmodel, uploadVectorUmodel
+from controllers.u_controllers import GetProfileImageU, UpdateProfileImageU, UploadUGVector, addFeedBackU, fetchAssessmentU, fetchHistoryU, getAssessmentsU,getUtweet,getUanswer,getUtranslate,UploadUGImageUUrl,getUimageuurl,AssessUContent,InsertQuestionU,loginU,registerU,forgotPasswordU,updatePasswordU,beforeRegisterU,checkAssessUContent,profileU,UpdateProfileU
+from models.u_models import FeedBackUmodel, UpdatePasswordUmodel, uTweet,uAnswer,ucorrect,QuestionUmodel,loginUmodel,registerUmodel,ForgotPasswordUmodel,confirmRegisterUmodel,AssessUmodel,ProfileUmodel, uploadVectorUmodel
 import jwt
 import json
 import typing
 import pymongo
+import uvicorn
 from starlette import background
 from bson.objectid import ObjectId
-
+from fastapi.staticfiles import StaticFiles
+from fastapi import File,UploadFile
 
 app = FastAPI()
+
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -76,7 +81,8 @@ origins = [
 	"http://localhost:3001",
 	"https://sahasraai.vercel.app",
 	"https://www.sahasra.ai",
-	"https://questionbank-one.vercel.app"
+	"https://questionbank-one.vercel.app",
+	"https://v0-sahas.vercel.app"
 ]
 
 
@@ -89,6 +95,8 @@ app.add_middleware(
 	expose_headers = ["X-Auth-Session"]
 )
 
+
+app.mount("/static",StaticFiles(directory="static"),name="static")
 
 
 
@@ -118,7 +126,9 @@ def ulogin(ubody:loginUmodel,request:Request,response:Response):
 	studentuid = loginU(ubody.mobilenumberoremail,ubody.password)
 	if studentuid:
 		try:
-			token = jwt.encode(payload={"user":studentuid},key="SECRET_UG",algorithm="HS256")
+			iat = int(time.time())
+			jti = uuid.uuid4().hex
+			token = jwt.encode(payload={"user":studentuid,"iat":iat,"jti":jti},key="SECRET_UG",algorithm="HS256")
 			c.sahasra_tokens.auth_tokens.create_index("ExpiresAt",expireAfterSeconds=2*60*60)
 			c.sahasra_tokens.auth_tokens.insert_one({"student_id":studentuid,"token":token,"ExpiresAt":datetime.datetime.utcnow()})
 			return JSONResponse(content={"Message":"Logged in SuccessFully"},status_code=200,headers={"X-Auth-Session":token})
@@ -166,14 +176,14 @@ def uRegister(ubody:registerUmodel):
 
 @app.post("/register")
 def uconfirmRegister(ubody:confirmRegisterUmodel):
-	resu,studentid = registerU(ubody)
+	resu,studentid,status_code = registerU(ubody)
 	if studentid:
 		try:
 			expdateug = time.time() + 2*3600
 			token = jwt.encode(payload={"user":studentid,"exp":expdateug},key="SECRET_UG",algorithm="HS256")
 			c.sahasra_tokens.auth_tokens.create_index("ExpiresAt",expireAfterSeconds=2*60*60)
 			c.sahasra_tokens.auth_tokens.insert_one({"student_id":studentid,"token":token,"ExpiresAt":datetime.datetime.utcnow()})
-			return JSONResponse(content={"Message":"Registered  User SuccessFully"},status_code=200,headers={"X-Auth-Session":token})
+			return JSONResponse(content={"Message":resu},status_code=status_code,headers={"X-Auth-Session":token})
 		except Exception as e:
 			print(e)
 			return JSONResponse(content={"Message":"Something Went Wrong"},status_code=400)
@@ -217,6 +227,11 @@ def uGetAssessmentWithId(assessment_id,studentid:str = Depends(auth_middleware))
 	resu,status_code = fetchAssessmentU(studentid,assessment_id)
 	return UGJSONResponse(content=resu,status_code=status_code)
 
+@app.post("/feedback",response_class=UGJSONResponse)
+def uGetFeedBack(ubody:FeedBackUmodel,studentid:str=Depends(auth_middleware)):
+	feedbackug = ubody.feedback
+	resu,status_code = addFeedBackU(studentid,feedbackug)
+	return UGJSONResponse(content=resu,status_code=status_code)
 
 @app.get("/profile",response_class=JSONResponse)
 def uProfile(request:Request,studentid:str = Depends(auth_middleware)):
@@ -225,6 +240,18 @@ def uProfile(request:Request,studentid:str = Depends(auth_middleware)):
 	print(resu)
 	return JSONResponse(content=dict(resu),status_code=status_code)
 
+
+
+@app.post("/updateprofileimage",response_class=UGJSONResponse)
+async def uProfileImage(studentid:str=Depends(auth_middleware),file:UploadFile=File(...)):
+	resu,status_code = await UpdateProfileImageU(studentid,file)
+	return UGJSONResponse(content=resu,status_code=status_code)
+
+@app.get("/getprofileimage",response_class=UGJSONResponse)
+def uGetProfileImage(studentid:str=Depends(auth_middleware)):
+	resu,status_code = GetProfileImageU(studentid)
+	return UGJSONResponse(content=resu,status_code=status_code)
+	
 
 
 @app.post("/updateprofile",response_class=JSONResponse)
@@ -253,7 +280,7 @@ def insQuestion(body:QuestionUmodel):
 
 @app.post("/api/uUploadVector")
 def split_lang(ubody:uploadVectorUmodel):
-		doc_ucontent = UploadUGVector(ubody.text)
+		doc_ucontent = UploadUGVector(ubody.text,ubody.subject)
 		return {"success_code":1}
 
 
@@ -290,4 +317,9 @@ def get_utranslate(body: ucorrect):
 	except Exception as e:
 		print(e)
 		return {"uGEN":"ERROR"}
+
+
+
+
+
 

@@ -38,35 +38,35 @@ def register_email(email,token):
    print("Message sent!")'''
 
 def register_phoneNumberU(number,token):
-   url = "https://secureapi.sendshortly.com/api/sms/send"
-   ubody={
-    "apikey": "l42vEftXlufH9Hpa3vk8",
-    "peid": "1001580741702775000",
+   url = "http://adwingssms.com/sms/V1/send-sms-api.php"
+   params={
+    "apikey": "ofFXAN7qtpOCs9jM",
+    "entityid":"1001580741702775000",
     "senderid": "SAHAAI",
-    "templateid": "1007120435373993437",
-    "phonenumber": f"{number}",
+    "templateid":"1007120435373993437",
+    "number": f"{number}",
     "message": f"Your Sahasra signup OTP is {token}. Please enter this code to verify your mobile number. The code is valid for 10 minutes. Do not share it with anyone.",
-    "templatetype": "serviceimplicit"
+    "format":"json"
 }
-   print(ubody)
-   r = requests.post(url,json=ubody)
+   r = requests.get(url,params=params,verify=False)
    print(r.content)
    if r.status_code == 200:
       return True
    return False   
 
 def send_phoneNumberU(number,token):
-   url = "https://secureapi.sendshortly.com/api/sms/send"
-   ubody={
-    "apikey": "l42vEftXlufH9Hpa3vk8",
-    "peid": "1001580741702775000",
+   url = "https://adwingssms.com/sms/V1/send-sms-api.php"
+   params={
+    "apikey": "ofFXAN7qtpOCs9jM",
+    "entityid":"1001580741702775000",
     "senderid": "SAHAAI",
-    "templateid": "1007120435373993437",
-    "phonenumber": f"{number}",
-    "message": f"Your Sahasra Forgot Password OTP is {token}. Please enter this code to verify And Change Your Password. The code is valid for 10 minutes. Do not share it with anyone.",
-    "templatetype": "serviceimplicit"
+    "templateid":"1007478402432295356",
+    "number": f"{number}",
+    "message": f"Your Sahasra password reset OTP is {token}. Please enter this code to reset your password. The code is valid for 10 minutes. Do not share it with anyone.",
+    "format":"json"
 }
-   r = requests.post(url,json=ubody)
+   
+   r = requests.get(url,params=params,verify=False)
    print(r.content)
    if r.status_code == 200:
       return True
