@@ -8,6 +8,7 @@ class uTweet(BaseModel):
 
 class uploadVectorUmodel(BaseModel):
 	text:str
+	subject:str
 
 class uAnswer(BaseModel):
 	question:str
@@ -82,3 +83,6 @@ class ProfileUmodel(BaseModel):
 	Class: str | None
 	educationboard: str | None
 	bio: str | None
+
+class FeedBackUmodel(BaseModel):
+	feedback:str
