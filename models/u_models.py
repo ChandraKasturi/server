@@ -1,5 +1,6 @@
 from pydantic import BaseModel,RootModel
 from typing import List,Dict,Optional
+from datetime import datetime
 
 
 class uTweet(BaseModel):
@@ -69,12 +70,14 @@ class QuestionUmodel(BaseModel):
 
 
 class questionAssessUmodel(BaseModel):
-	questionid:str
-	studentanswer:str | None
+	questionid: str
+	studentanswer: Optional[str] = None
+	question_type: Optional[str] = None  # MCQ, DESCRIPTIVE, FILL_BLANKS
 
 
 class AssessUmodel(BaseModel):
-	questions:List[questionAssessUmodel]
+	assessment_id: str
+	questions: List[questionAssessUmodel]
 
 class ProfileUmodel(BaseModel):
 	email:str | None
@@ -86,3 +89,32 @@ class ProfileUmodel(BaseModel):
 
 class FeedBackUmodel(BaseModel):
 	feedback:str
+	
+class PDFAssessmentRequest(BaseModel):
+    """Request model for generating assessments from PDF documents."""
+    pdf_id: str
+    question_type: Optional[str] = "MIXED"  # MCQ, DESCRIPTIVE, FILL_BLANKS, MIXED
+    num_questions: Optional[int] = 10
+    
+class AssessmentResultQuestion(BaseModel):
+    """Individual question result in an assessment submission."""
+    questionid: str
+    is_correct: bool
+    feedback: str
+    
+class AssessmentResult(BaseModel):
+    """Response model for assessment submission results."""
+    results: List[AssessmentResultQuestion]
+    correct_count: int
+    total_questions: int
+    score_percentage: float
+    
+class AssessmentSubmissionResult(BaseModel):
+    """Comprehensive response model for assessment submissions."""
+    assessment_id: str
+    student_id: str
+    submission_time: datetime
+    results: List[AssessmentResultQuestion]
+    correct_count: int
+    total_questions: int
+    score_percentage: float

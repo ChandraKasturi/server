@@ -1,9 +1,9 @@
-import psycopg
+import psycopg2
 from langchain.embeddings import OpenAIEmbeddings
 import uuid
 class PostgresVectorStore:
     def __init__(self, connection_params, table, key):
-        self.conn = psycopg.connect(**connection_params)
+        self.conn = psycopg2.connect(**connection_params)
         self.table = table
         self.embeddings = OpenAIEmbeddings(api_key=key)  # Initialize your embedding model here
 
