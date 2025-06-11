@@ -93,7 +93,7 @@ class FeedBackUmodel(BaseModel):
 class PDFAssessmentRequest(BaseModel):
     """Request model for generating assessments from PDF documents."""
     pdf_id: str
-    question_type: Optional[str] = "MIXED"  # MCQ, DESCRIPTIVE, FILL_BLANKS, MIXED
+    question_types: Optional[List[str]] = None  # List of types: ["MCQ", "DESCRIPTIVE", "FILL_BLANKS", "TRUEFALSE"]
     num_questions: Optional[int] = 10
     
 class AssessmentResultQuestion(BaseModel):
@@ -118,3 +118,13 @@ class AssessmentSubmissionResult(BaseModel):
     correct_count: int
     total_questions: int
     score_percentage: float
+
+class AssessmentRequest(BaseModel):
+    """Request model for generating assessments."""
+    subject: str
+    topic: Optional[str] = None  # Legacy field, kept for backward compatibility
+    topics: Optional[List[str]] = None  # New field for multiple topics
+    subtopic: Optional[str] = None
+    question_types: Optional[List[str]] = None  # List of types: ["MCQ", "DESCRIPTIVE", "FILL_BLANKS", "TRUEFALSE"]
+    number_of_questions: Optional[int] = 5
+    level: Optional[int] = 1

@@ -3,10 +3,12 @@ from fastapi.responses import JSONResponse
 from typing import List, Optional, Dict, Any, Union
 import json
 import redis.asyncio as redis
+import httpx
+from datetime import datetime
 
 from config import settings
 from models.pdf_models import PDFDocument, PDFUploadRequest, PDFLearnRequest
-from services.pdf.pdf_service import PDFUploadService, PDFProcessingService
+from services.pdf.pdf_service import PDFUploadService, PDFProcessingService, PDFQuestionGenerationService
 from services.langchain.langchain_service import LangchainService
 from routers.auth import auth_middleware
 
@@ -23,6 +25,7 @@ pdf_processing_service = PDFProcessingService(
     redis_client=redis_client,
     max_workers=settings.REDIS_MAX_WORKERS
 )
+pdf_question_service = PDFQuestionGenerationService()
 langchain_service = LangchainService()
 
 
@@ -117,6 +120,7 @@ async def upload_pdf(
 @router.get("/list")
 async def list_pdfs(
     request: Request,
+    subject: Optional[str] = None,
     x_auth_session: Optional[str] = Header(None),
     user_id: str = Depends(auth_middleware)
 ):
@@ -124,6 +128,7 @@ async def list_pdfs(
     
     Args:
         request: The request object
+        subject: Optional subject to filter PDFs by
         x_auth_session: JWT token for authentication
         user_id: User ID extracted from JWT token
         
@@ -131,7 +136,7 @@ async def list_pdfs(
         UGJSONResponse with list of PDF documents
     """
     try:
-        pdfs = pdf_upload_service.get_user_pdfs(user_id)
+        pdfs = pdf_upload_service.get_user_pdfs(user_id, subject)
         return UGJSONResponse(
             data=[pdf.model_dump_json() for pdf in pdfs],
             message="PDF documents retrieved successfully"
@@ -396,7 +401,7 @@ async def learn_from_pdf(
     
     Args:
         pdf_id: ID of the PDF document
-        request_body: Request body containing the question
+        request_body: Request body containing the question and optional parameters
         request: The request object
         x_auth_session: JWT token for authentication
         user_id: User ID extracted from JWT token
@@ -431,26 +436,30 @@ async def learn_from_pdf(
                 status_code=400
             )
             
-        # Get question from the request body model
+        # Get question and parameters from the request body model
         question = request_body.question
+        similarity_threshold = request_body.similarity_threshold
         
         # Use LangchainService to answer the question
-        answer, status_code = langchain_service.learn_from_pdf(
+        response, status_code = await langchain_service.learn_from_pdf(
             student_id=user_id,
             pdf_id=pdf_id,
             question=question,
-            session_id=x_auth_session
+            session_id=x_auth_session,
+            similarity_threshold=similarity_threshold or 0.75  # Use default if not provided
         )
         
         if status_code != 200:
+            # Handle error case - response is a string message
             return UGJSONResponse(
                 data={},
-                message=answer,
+                message=response if isinstance(response, str) else "Error processing request",
                 status_code=status_code
             )
-            
+        
+        # Return the structured response directly
         return UGJSONResponse(
-            data={"answer": answer},
+            data=response,
             message="Learning answer generated successfully"
         )
         
@@ -458,5 +467,74 @@ async def learn_from_pdf(
         return UGJSONResponse(
             data={},
             message=f"Error learning from PDF: {str(e)}",
+            status_code=500
+        )
+
+
+@router.post("/generate-questions")
+async def generate_questions_from_pdf(
+    file: UploadFile = File(...),
+    subject: str = Form(...),
+    topic: str = Form(...),
+    subtopic: str = Form(...),
+    request: Request = None,
+    x_auth_session: Optional[str] = Header(None),
+    user_id: str = Depends(auth_middleware)
+):
+    """Generate questions from a PDF using Gemini OCR and insert them into question bank.
+    
+    Args:
+        file: PDF file to process
+        subject: Subject for the questions
+        topic: Topic for the questions
+        subtopic: Subtopic for the questions
+        request: The request object
+        x_auth_session: JWT token for authentication
+        user_id: User ID extracted from JWT token
+        
+    Returns:
+        UGJSONResponse with generated questions data
+    """
+    try:
+        # Validate file extension
+        if not file.filename.lower().endswith('.pdf'):
+            return UGJSONResponse(
+                data={},
+                message="Only PDF files are allowed",
+                status_code=400
+            )
+        
+        # Check file size
+        file.file.seek(0, 2)  # Go to end of file
+        file_size = file.file.tell()  # Get current position (file size)
+        file.file.seek(0)  # Reset file position to beginning
+        
+        if file_size > settings.PDF_MAX_FILE_SIZE:
+            return UGJSONResponse(
+                data={},
+                message=f"File is too large. Maximum size is {settings.PDF_MAX_FILE_SIZE / 1024 / 1024}MB",
+                status_code=400
+            )
+        
+        # Read the PDF file content
+        pdf_content = await file.read()
+        
+        # Use the PDF question generation service
+        result = await pdf_question_service.generate_questions_from_pdf(
+            pdf_content=pdf_content,
+            subject=subject,
+            topic=topic,
+            subtopic=subtopic
+        )
+        
+        return UGJSONResponse(
+            data=result,
+            message=f"Successfully generated and inserted {result['total_questions_generated']} questions into question bank"
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            data={},
+            message=f"Error generating questions from PDF: {str(e)}",
             status_code=500
         ) 

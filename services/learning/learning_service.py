@@ -1,12 +1,17 @@
+import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_postgres.vectorstores import PGVector
 from langchain.embeddings import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 from datetime import datetime
+import concurrent.futures
 
 from config import settings
 from repositories.pdf_repository import PDFRepository
@@ -45,10 +50,15 @@ class LearningService:
         """
         self.api_key = openai_api_key or settings.OPENAI_API_KEY
         self.embeddings = OpenAIEmbeddings(api_key=self.api_key)
+        '''self.embeddings = GoogleGenerativeAIEmbeddings(google_api_key=settings.GOOGLE_API_KEY,model="models/gemini-embedding-exp-03-07")'''
         self.llm = ChatOpenAI(api_key=self.api_key)
         self.ug_llm = ChatOpenAI(api_key=self.api_key, model="gpt-4o")
+        '''self.llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")
+        self.ug_llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")'''
         self.pdf_repository = PDFRepository()
         self.history_repository = HistoryRepository()
+        # Thread pool for blocking operations
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
     
     def _setup_chat_history(self, student_id: str, session_id: str, subject: str) -> MongoDBChatMessageHistory:
         """Set up a MongoDB-based chat history for a student with subject-specific collection.
@@ -71,36 +81,20 @@ class LearningService:
             session_id=session_id,
             history_size=10
         )
-    
-    def _add_to_chat_history(self, student_id: str, session_id: str, subject: str,
-                           message: str, is_ai: bool = True) -> None:
-        """Add a message to the subject-specific chat history.
+
+    def _get_session_history(self, student_id: str, subject: str):
+        """Factory function to create chat history for RunnableWithMessageHistory.
         
         Args:
             student_id: ID of the student
-            session_id: JWT token from X-Auth-Session
             subject: Subject for this chat history
-            message: Message content to add
-            is_ai: Whether the message is from the AI (True) or user (False)
+            
+        Returns:
+            Function that creates MongoDBChatMessageHistory for a given session_id
         """
-        history = self._setup_chat_history(student_id, session_id, subject)
-        
-        if is_ai:
-            history.add_message(AIMessage(content=message))
-        else:
-            history.add_message(HumanMessage(content=message))
-        
-        # Additionally, store in sahasra_history for persistence and retrieval
-        history_data = {
-            "subject": subject,
-            "message": message,
-            "is_ai": is_ai,
-            "time": datetime.utcnow(),
-            "session_id": session_id
-        }
-        
-        # Add to sahasra_history
-        self.history_repository.add_history_item(student_id, history_data)
+        def get_history(session_id: str) -> MongoDBChatMessageHistory:
+            return self._setup_chat_history(student_id, session_id, subject)
+        return get_history
     
     def _get_student_specific_connection_string(self, student_id: str) -> str:
         """Get a student-specific connection string for PGVector.
@@ -185,7 +179,6 @@ class LearningService:
                         
                         # Get relevant documents from this PDF
                         pdf_results = pdf_retriever.get_relevant_documents(question)
-                        
                         # Add source information to each document
                         for doc in pdf_results:
                             if not hasattr(doc, "metadata"):
@@ -202,13 +195,109 @@ class LearningService:
         
         return pdf_docs
     
-    def learn_subject(self, 
+    async def _get_subject_pdf_content_async(self, student_id: str, subject: str, question: str) -> List[Dict]:
+        """Async version of getting content from user's PDFs related to the specified subject.
+        
+        Args:
+            student_id: ID of the student
+            subject: Subject to filter PDFs by
+            question: Question to retrieve relevant content for
+            
+        Returns:
+            List of documents with relevant content
+        """
+        def _get_pdf_content_sync():
+            return self._get_subject_pdf_content(student_id, subject, question)
+        
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _get_pdf_content_sync)
+
+    async def _get_vector_store_results_async(self, subject_collection: str, question: str) -> List:
+        """Async version of getting results from vector store.
+        
+        Args:
+            subject_collection: Subject collection name
+            question: Question to search for
+            
+        Returns:
+            List of relevant documents
+        """
+        def _get_results_sync():
+            # Initialize PGVector with the subject collection
+            subject_vector_store = PGVector(
+                embeddings=self.embeddings,
+                collection_name=subject_collection,
+                connection=settings.PGVECTOR_CONNECTION_STRING,
+                use_jsonb=True
+            )
+            
+            # Create a retriever from the vector store
+            subject_retriever = subject_vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 5})
+            
+            # Get relevant documents from subject collection
+            return subject_retriever.get_relevant_documents(question)
+        
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _get_results_sync)
+
+    async def _run_chain_async(self, chain_with_history, chain_input: Dict, config: Dict) -> str:
+        """Async version of running the chain with history.
+        
+        Args:
+            chain_with_history: Chain with message history
+            chain_input: Input for the chain
+            config: Configuration for the chain
+            
+        Returns:
+            Generated answer
+        """
+        def _run_chain_sync():
+            return chain_with_history.invoke(chain_input, config=config)
+        
+        # Run the chain in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _run_chain_sync)
+
+    async def _run_chain_without_history_async(self, chain, chain_input: Dict) -> str:
+        """Async version of running the chain without history.
+        
+        Args:
+            chain: Chain without history
+            chain_input: Input for the chain
+            
+        Returns:
+            Generated answer
+        """
+        def _run_chain_sync():
+            return chain.invoke(chain_input)
+        
+        # Run the chain in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _run_chain_sync)
+
+    async def _store_history_async(self, student_id: str, history_data: Dict) -> None:
+        """Async version of storing history data.
+        
+        Args:
+            student_id: ID of the student
+            history_data: History data to store
+        """
+        def _store_history_sync():
+            return self.history_repository.add_history_item(student_id, history_data)
+        
+        # Run the database operation in a thread pool
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(self.thread_pool, _store_history_sync)
+
+    async def learn_subject(self, 
                     subject: str, 
                     question: str, 
                     student_id: str, 
                     session_id: str = None,
                     include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about a specific subject.
+        """Learn about a specific subject (async version).
         
         Args:
             subject: Subject to learn about (science, social_science, mathematics, english, hindi)
@@ -225,43 +314,17 @@ class LearningService:
             if subject not in self.SUBJECT_COLLECTIONS:
                 return f"Invalid subject: {subject}. Valid subjects are: {', '.join(self.SUBJECT_COLLECTIONS.keys())}", 400
             
-            # Add the user question to the subject-specific chat history
-            if session_id:
-                self._add_to_chat_history(student_id, session_id, subject, question, is_ai=False)
-            else:
-                # Even without session_id, store in sahasra_history
-                history_data = {
-                    "subject": subject,
-                    "message": question,
-                    "is_ai": False,
-                    "time": datetime.utcnow()
-                }
-                self.history_repository.add_history_item(student_id, history_data)
-            
-            # STEP 1: Get relevant documents from the subject knowledge base
+            # STEP 1: Get relevant documents from the subject knowledge base (async)
             subject_collection = self.SUBJECT_COLLECTIONS[subject]
-            
-            # Initialize PGVector with the subject collection
-            subject_vector_store = PGVector(
-                embeddings=self.embeddings,
-                collection_name=subject_collection,
-                connection=settings.PGVECTOR_CONNECTION_STRING,
-                use_jsonb=True
-            )
-            
-            # Create a retriever from the vector store
-            subject_retriever = subject_vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 5})
-            
-            # Get relevant documents from subject collection
-            subject_docs = subject_retriever.get_relevant_documents(question)
+            subject_docs = await self._get_vector_store_results_async(subject_collection, question)
             
             # Extract content from subject knowledge documents
             subject_context = [doc.page_content for doc in subject_docs]
             
-            # STEP 2: Get relevant documents from user's PDFs if requested
+            # STEP 2: Get relevant documents from user's PDFs if requested (async)
             pdf_docs = []
             if include_pdfs:
-                pdf_docs = self._get_subject_pdf_content(student_id, subject, question)
+                pdf_docs = await self._get_subject_pdf_content_async(student_id, subject, question)
             
             # Extract content from PDF documents with source info
             pdf_context = [f"{doc.metadata.get('source', '')}: {doc.page_content}" for doc in pdf_docs]
@@ -280,14 +343,9 @@ class LearningService:
                 all_context_parts.extend(pdf_context)
             
             # Join all context parts
-            context = "\n".join(all_context_parts) if all_context_parts else ""
+            context = "\n".join(all_context_parts) if all_context_parts else ""            
             
-            # STEP 4: Get chat history for this subject
-            history = None
-            if session_id:
-                history = self._setup_chat_history(student_id, session_id, subject)
-            
-            # STEP 5: Create prompt with subject-specific system message
+            # STEP 4: Create prompt with subject-specific system message and history
             system_prompt = self.SUBJECT_PROMPTS.get(subject, "You are an educational assistant.")
             
             prompt_messages = [
@@ -295,20 +353,15 @@ class LearningService:
                           "Use the provided context to give accurate answers. "
                           "If your answer includes information from the student's own documents, clearly indicate this. "
                           "If you're unsure or the answer is not in the context, be honest about it.\n\n"
-                          "Context: {context}")
+                          "Context: {context}"),
+                MessagesPlaceholder(variable_name="history"),
+                ("human", "{question}")
             ]
-            
-            # Add chat history if available
-            if history and history.messages:
-                prompt_messages.append(MessagesPlaceholder(variable_name="history"))
-            
-            # Add the current question
-            prompt_messages.append(("human", "{question}"))
             
             # Create prompt template
             prompt = ChatPromptTemplate.from_messages(prompt_messages)
             
-            # STEP 6: Create chain and generate answer
+            # STEP 5: Create chain with history integration
             chain = prompt | self.ug_llm | StrOutputParser()
             
             # Prepare input for the chain
@@ -317,25 +370,45 @@ class LearningService:
                 "question": question
             }
             
-            # Add history if available
-            if history and history.messages:
-                chain_input["history"] = history.messages
-            
-            # Run chain to get answer
-            answer = chain.invoke(chain_input)
-            
-            # STEP 7: Add the AI's answer to the chat history
+            # Create chain with message history if session_id is provided and run async
             if session_id:
-                self._add_to_chat_history(student_id, session_id, subject, answer, is_ai=True)
+                chain_with_history = RunnableWithMessageHistory(
+                    chain,
+                    self._get_session_history(student_id, subject),
+                    input_messages_key="question",
+                    history_messages_key="history",
+                )
+                
+                # Configure session
+                config = {"configurable": {"session_id": session_id}}
+                
+                # Run chain with history to get answer (async)
+                answer = await self._run_chain_async(chain_with_history, chain_input, config)
             else:
-                # Even without session_id, store in sahasra_history
-                history_data = {
-                    "subject": subject,
-                    "message": answer,
-                    "is_ai": True,
-                    "time": datetime.utcnow()
-                }
-                self.history_repository.add_history_item(student_id, history_data)
+                # Fallback: run without history if no session_id (async)
+                chain_input["history"] = []  # Empty history
+                answer = await self._run_chain_without_history_async(chain, chain_input)
+            
+            # STEP 6: Store in sahasra_history for persistence (async)
+            # Store user question
+            user_history_data = {
+                "subject": subject,
+                "message": question,
+                "is_ai": False,
+                "time": datetime.utcnow(),
+                "session_id": session_id
+            }
+            await self._store_history_async(student_id, user_history_data)
+            
+            # Store AI response
+            ai_history_data = {
+                "subject": subject,
+                "message": answer,
+                "is_ai": True,
+                "time": datetime.utcnow(),
+                "session_id": session_id
+            }
+            await self._store_history_async(student_id, ai_history_data)
             
             return answer, 200
             
@@ -344,10 +417,10 @@ class LearningService:
             print(error_message)
             return error_message, 500
     
-    # Subject-specific convenience methods
+    # Subject-specific convenience methods (now async)
     
-    def learn_science(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about science.
+    async def learn_science(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
+        """Learn about science (async).
         
         Args:
             question: Question about science
@@ -358,10 +431,10 @@ class LearningService:
         Returns:
             Tuple of (answer, status_code)
         """
-        return self.learn_subject("science", question, student_id, session_id, include_pdfs)
+        return await self.learn_subject("science", question, student_id, session_id, include_pdfs)
     
-    def learn_social_science(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about social science.
+    async def learn_social_science(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
+        """Learn about social science (async).
         
         Args:
             question: Question about social science
@@ -372,10 +445,10 @@ class LearningService:
         Returns:
             Tuple of (answer, status_code)
         """
-        return self.learn_subject("social_science", question, student_id, session_id, include_pdfs)
+        return await self.learn_subject("social_science", question, student_id, session_id, include_pdfs)
     
-    def learn_mathematics(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about mathematics.
+    async def learn_mathematics(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
+        """Learn about mathematics (async).
         
         Args:
             question: Question about mathematics
@@ -386,10 +459,10 @@ class LearningService:
         Returns:
             Tuple of (answer, status_code)
         """
-        return self.learn_subject("mathematics", question, student_id, session_id, include_pdfs)
+        return await self.learn_subject("mathematics", question, student_id, session_id, include_pdfs)
     
-    def learn_english(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about English.
+    async def learn_english(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
+        """Learn about English (async).
         
         Args:
             question: Question about English
@@ -400,10 +473,10 @@ class LearningService:
         Returns:
             Tuple of (answer, status_code)
         """
-        return self.learn_subject("english", question, student_id, session_id, include_pdfs)
+        return await self.learn_subject("english", question, student_id, session_id, include_pdfs)
     
-    def learn_hindi(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about Hindi.
+    async def learn_hindi(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
+        """Learn about Hindi (async).
         
         Args:
             question: Question about Hindi
@@ -414,4 +487,4 @@ class LearningService:
         Returns:
             Tuple of (answer, status_code)
         """
-        return self.learn_subject("hindi", question, student_id, session_id, include_pdfs) 
+        return await self.learn_subject("hindi", question, student_id, session_id, include_pdfs) 

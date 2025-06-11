@@ -3,7 +3,9 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 from datetime import datetime
 
-from models.u_models import AssessUmodel, FeedBackUmodel, uAnswer, PDFAssessmentRequest
+from models.u_models import (
+    AssessUmodel, FeedBackUmodel, uAnswer, PDFAssessmentRequest, AssessmentRequest
+)
 from services.assessment.assessment_service import AssessmentService
 from routers.auth import auth_middleware
 from utils.json_response import UGJSONResponse
@@ -35,28 +37,31 @@ def submit_assessment(body: AssessUmodel, request: Request, student_id: str = De
     
     return UGJSONResponse(content=result, status_code=status_code)
 
-@router.post("/api/chat", response_class=UGJSONResponse)
-def check_assessment(body: uAnswer, request: Request, student_id: str = Depends(auth_middleware)):
-    """Check if the input is an assessment request or a regular chat question.
+@router.post("/api/assessment", response_class=UGJSONResponse)
+def generate_assessment(body: AssessmentRequest, request: Request, student_id: str = Depends(auth_middleware)):
+    """Generate assessment questions based on provided parameters.
     
     Args:
-        body: Request containing the question
+        body: Request containing subject, topics, subtopic, level, and number of questions
         request: FastAPI request object
         student_id: ID of the student (from auth middleware)
         
     Returns:
-        JSON response with assessment results or answer
+        JSON response with generated assessment
     """
     # Get session ID from JWT token
     session_id = request.headers.get("X-Auth-Session")
     
-    # Extract question from the request body
-    question = body.question
-    
     result, status_code = assessment_service.check_assessment_content(
-        question, 
-        session_id,
-        student_id
+        subject=body.subject,
+        topic=body.topic,  # Keep for backward compatibility
+        topics=body.topics,  # New field for list of topics
+        subtopic=body.subtopic,
+        level=body.level,
+        num_questions=body.number_of_questions,
+        question_types=body.question_types,
+        session_id=session_id,
+        student_id=student_id
     )
     
     return UGJSONResponse(content=result, status_code=status_code)
@@ -80,25 +85,27 @@ def generate_pdf_assessment(
     result, status_code = assessment_service.generate_assessment_from_pdf(
         body.pdf_id,
         student_id,
-        body.question_type,
+        body.question_types,
         body.num_questions
     )
     
     return UGJSONResponse(content=result, status_code=status_code)
 
 @router.get("/assessments", response_class=UGJSONResponse)
-def get_assessments(request: Request, student_id: str = Depends(auth_middleware), time: str = None):
+def get_assessments(request: Request, student_id: str = Depends(auth_middleware), time: str = None, subject: str = None, topic: str = None):
     """Get all assessments for a student.
     
     Args:
         request: FastAPI request object
         student_id: ID of the student (from auth middleware)
         time: Optional time filter
+        subject: Optional subject filter
+        topic: Optional topic filter to find assessments containing this topic
         
     Returns:
         JSON response with list of assessments
     """
-    assessments, status_code = assessment_service.get_assessments(student_id, time)
+    assessments, status_code = assessment_service.get_assessments(student_id, time, subject, topic)
     
     return UGJSONResponse(content=assessments, status_code=status_code)
 
@@ -291,20 +298,31 @@ def get_subject_history(
     subject: str,
     request: Request, 
     student_id: str = Depends(auth_middleware),
-    time: Optional[str] = None
+    time: Optional[str] = None,
+    page: int = 1,
+    oldest_first: bool = False
 ):
-    """Get learning history for a specific subject.
+    """Get learning history for a specific subject with pagination.
     
     Args:
         subject: The subject to get history for (science, social_science, mathematics, english, hindi)
         request: FastAPI request object
         student_id: ID of the student (from auth middleware)
         time: Optional time filter in ISO format (YYYY-MM-DDTHH:MM:SS)
+        page: Page number for pagination (default: 1, each page contains 10 items)
+        oldest_first: If True, return oldest messages first; if False, return newest first (default: False)
         
     Returns:
         JSON response with subject history
     """
     try:
+        # Validate page parameter
+        if page < 1:
+            return UGJSONResponse(
+                content={"Message": "Page number must be 1 or greater"},
+                status_code=400
+            )
+        
         # Convert time string to datetime if provided
         from_date = None
         if time:
@@ -316,26 +334,19 @@ def get_subject_history(
                     status_code=400
                 )
         
-        # Get all history items
-        history_items = history_repository.get_history(student_id, from_date)
+        # Get paginated history items with subject filtering at database level
+        history_items = history_repository.get_history(
+            student_id, 
+            from_date, 
+            page, 
+            page_size=10, 
+            oldest_first=oldest_first, 
+            subject=subject
+        )
         
-        # Filter by subject if specified
-        if subject.lower() != "all":
-            # Normalize subject name (replace hyphens with underscores)
-            normalized_subject = subject.replace("-", "_").lower()
-            
-            # Filter history items by subject
-            subject_history = [
-                item for item in history_items
-                if item.get("subject", "").lower() == normalized_subject
-            ]
-        else:
-            # Return all subjects if "all" is specified
-            subject_history = history_items
-        
-        # Format history items for response
+        # Format history items for response (no need to filter by subject anymore)
         formatted_history = []
-        for item in subject_history:
+        for item in history_items:
             formatted_item = {
                 "subject": item.get("subject", "unknown"),
                 "message": item.get("message", ""),
@@ -345,14 +356,17 @@ def get_subject_history(
             }
             formatted_history.append(formatted_item)
         
-        # Sort by time (most recent first)
-        formatted_history.sort(key=lambda x: x["time"], reverse=True)
+        # Note: We don't sort here again since the repository already returns sorted data
         
         return UGJSONResponse(
             content={
                 "subject": subject,
                 "history": formatted_history,
-                "count": len(formatted_history)
+                "count": len(formatted_history),
+                "page": page,
+                "page_size": 10,
+                "oldest_first": oldest_first,
+                "has_more": len(history_items) == 10  # If we got a full page, there might be more
             },
             status_code=200
         )

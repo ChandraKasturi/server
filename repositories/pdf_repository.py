@@ -60,16 +60,23 @@ class PDFRepository(MongoRepository):
             return PDFDocument(**doc)
         return None
     
-    def get_user_pdf_documents(self, user_id: str) -> List[PDFDocument]:
+    def get_user_pdf_documents(self, user_id: str, subject: Optional[str] = None) -> List[PDFDocument]:
         """Get all PDF documents for a user.
         
         Args:
             user_id: ID of the user
+            subject: Optional subject to filter PDFs by    
             
         Returns:
             List of PDF documents
         """
-        docs = list(self.pdf_documents.find({"user_id": user_id}))
+        query = {"user_id": user_id}
+        
+        # Add subject filter if provided
+        if subject:
+            query["metadata.subject"] = subject
+            
+        docs = list(self.pdf_documents.find(query))
         return [PDFDocument(**doc) for doc in docs]
     
     def update_pdf_status(self, pdf_id: str, status: ProcessingStatus, 
@@ -217,6 +224,22 @@ class PDFRepository(MongoRepository):
         doc_result = self.pdf_documents.delete_one({"id": pdf_id})
         chunk_result = self.pdf_chunks.delete_many({"pdf_id": pdf_id})
         return doc_result.deleted_count > 0, chunk_result.deleted_count > 0
+    
+    def update_pdf_document(self, pdf_id: str, update_data: Dict[str, Any]) -> bool:
+        """Update a PDF document with the provided data.
+        
+        Args:
+            pdf_id: ID of the PDF document
+            update_data: Dictionary of fields to update
+            
+        Returns:
+            True if update was successful
+        """
+        result = self.pdf_documents.update_one(
+            {"id": pdf_id},
+            {"$set": update_data}
+        )
+        return result.modified_count > 0
 
 
 class QuestionRepository(MongoRepository):

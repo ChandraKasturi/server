@@ -18,7 +18,7 @@ class QuestionType(str, Enum):
     MCQ = "mcq"
     FILL_BLANKS = "fill_in_blanks"
     DESCRIPTIVE = "descriptive"
-    MIXED = "mixed"
+    TRUEFALSE = "truefalse"
 
 
 class QuestionDifficulty(str, Enum):
@@ -232,9 +232,17 @@ class StudentResponse(BaseModel):
 class PDFLearnRequest(BaseModel):
     """Model for PDF learning request."""
     question: str = Field(..., description="Question about the PDF content to learn from")
+    similarity_threshold: Optional[float] = Field(default=None, description="Optional threshold for image similarity (0-1, lower is more similar)")
 
 
 class SubjectLearnRequest(BaseModel):
     """Model for subject-specific learning request."""
     question: str = Field(..., description="Question about the subject to learn about")
-    include_pdfs: bool = Field(default=True, description="Whether to include user's PDFs in the answer") 
+    include_pdfs: bool = Field(default=True, description="Whether to include user's PDFs in the answer")
+
+
+class TTSRequest(BaseModel):
+    """Model for text-to-speech request."""
+    text: str = Field(..., description="Text to convert to speech")
+    voice: Optional[str] = Field(default='af_heart', description="Voice to use for TTS")
+    speed: Optional[float] = Field(default=1.0, ge=0.25, le=4.0, description="Speed of speech (0.25 to 4.0)") 
