@@ -2,6 +2,7 @@ import uuid
 from typing import List, Optional, Any, Dict
 import psycopg2
 from langchain.embeddings import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.vectorstores import PGVector
 from langchain_core.documents import Document
 
@@ -24,6 +25,7 @@ class PgVectorRepository:
         self.table = table
         self.api_key = openai_api_key or settings.OPENAI_API_KEY
         self.embeddings = OpenAIEmbeddings(api_key=self.api_key)
+        '''self.embeddings = GoogleGenerativeAIEmbeddings(google_api_key=settings.GOOGLE_API_KEY)'''
         
         # Parse connection string to extract connection parameters
         conn_str = settings.PGVECTOR_CONNECTION_STRING

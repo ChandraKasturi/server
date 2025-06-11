@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional, Tuple
 from langchain_text_splitters import RecursiveCharacterTextSplitter, CharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.vectorstores import SupabaseVectorStore
@@ -16,6 +17,8 @@ import uuid
 import os
 import json
 from langchain_core.messages import HumanMessage, AIMessage
+import asyncio
+import concurrent.futures
 
 from config import settings
 from repositories.pgvector_repository import LangchainVectorRepository
@@ -37,13 +40,17 @@ class LangchainService:
         # OpenAI models
         self.llm = ChatOpenAI(openai_api_key=self.openai_api_key)
         self.ug_llm = ChatOpenAI(openai_api_key=self.openai_api_key, model="gpt-4o")
+        '''self.llm = ChatGoogleGenerativeAI(google_api_key=self.google_api_key, model="gemini-2.0-flash")
+        self.ug_llm = ChatGoogleGenerativeAI(google_api_key=self.google_api_key, model="gemini-2.0-flash")'''
         
+
         # Google models (commented out but available)
         # self.llm = ChatGoogleGenerativeAI(google_api_key=self.google_api_key, model="gemini-1.5-pro")
         # self.ug_llm = ChatGoogleGenerativeAI(google_api_key=self.google_api_key, model="gemini-1.5-pro")
         
         # Embeddings
         self.embeddings = OpenAIEmbeddings(openai_api_key=self.openai_api_key)
+        '''self.embeddings = GoogleGenerativeAIEmbeddings(google_api_key=self.google_api_key,model="models/gemini-embedding-exp-03-07")'''
         
         # Text splitters
         self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
@@ -83,6 +90,9 @@ class LangchainService:
             retriever=self.image_url_retriever,
             llm=self.llm
         )
+        
+        # Thread pool for blocking operations
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=6)
     
     def setup_chat_history(self, student_id: str, session_id: str) -> MongoDBChatMessageHistory:
         """Set up a MongoDB-based chat history for a student.
@@ -416,21 +426,147 @@ class LangchainService:
         except Exception as e:
             return f"Error translating text: {str(e)}", 500
     
-    def learn_from_pdf(self, student_id: str, pdf_id: str, question: str, session_id: str = None) -> Tuple[str, int]:
-        """Learn from a specific PDF document using RAG.
+    async def _get_pdf_documents_async(self, student_id: str, question: str, connection_string: str, collection_name: str) -> List[Document]:
+        """Async version of getting relevant documents from PDF.
+        
+        Args:
+            student_id: ID of the student
+            question: Question to search for
+            connection_string: Database connection string
+            collection_name: Collection name
+            
+        Returns:
+            List of relevant documents
+        """
+        def _get_docs_sync():
+            # Initialize PGVector with the student-specific connection
+            pdf_vector_store = PGVector(
+                embeddings=self.embeddings,
+                collection_name=collection_name,
+                connection=connection_string,
+                use_jsonb=True
+            )
+            
+            # Create a retriever from the vector store
+            pdf_retriever = pdf_vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 5})
+            
+            # Get relevant documents for the question
+            return pdf_retriever.get_relevant_documents(question)
+        
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _get_docs_sync)
+
+    async def _find_relevant_image_async(self, connection_string: str, collection_name: str, query: str, similarity_threshold: float = 0.4) -> Optional[Dict]:
+        """Async version of finding a relevant image for the query.
+        
+        Args:
+            connection_string: Connection string for the database
+            collection_name: Name of the image captions collection
+            query: The query to search for
+            similarity_threshold: Minimum similarity score required
+            
+        Returns:
+            Dictionary with image information if found, None otherwise
+        """
+        def _find_image_sync():
+            return self._find_relevant_image(connection_string, collection_name, query, similarity_threshold)
+        
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _find_image_sync)
+
+    async def _run_chain_async(self, chain, input_data: Dict) -> str:
+        """Async version of running a LangChain chain.
+        
+        Args:
+            chain: LangChain chain to run
+            input_data: Input data for the chain
+            
+        Returns:
+            Chain output
+        """
+        def _run_chain_sync():
+            return chain.invoke(input_data)
+        
+        # Run the chain in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _run_chain_sync)
+
+    async def _add_to_chat_history_async(self, student_id: str, session_id: str, message: str, is_ai: bool = True) -> None:
+        """Async version of adding to chat history.
+        
+        Args:
+            student_id: ID of the student
+            session_id: Session ID
+            message: Message to add
+            is_ai: Whether message is from AI
+        """
+        def _add_history_sync():
+            return self.add_to_chat_history(student_id, session_id, message, is_ai)
+        
+        # Run the database operation in a thread pool
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(self.thread_pool, _add_history_sync)
+
+    def _get_pdf_session_history(self, student_id: str, pdf_id: str):
+        """Factory function to create chat history for PDF learning with RunnableWithMessageHistory.
+        
+        Args:
+            student_id: ID of the student
+            pdf_id: ID of the PDF document
+            
+        Returns:
+            Function that creates MongoDBChatMessageHistory for a given session_id
+        """
+        def get_history(session_id: str) -> MongoDBChatMessageHistory:
+            collection_name = f"{settings.MONGO_DATABASE_HISTORY}_{pdf_id}"
+            return MongoDBChatMessageHistory(
+                connection_string=settings.MONGO_URI,
+                database_name=student_id,
+                collection_name=collection_name,
+                session_id=session_id,
+                history_size=10
+            )
+        return get_history
+
+    async def _run_pdf_chain_async(self, chain_with_history, chain_input: Dict, config: Dict) -> str:
+        """Async version of running the PDF learning chain with history.
+        
+        Args:
+            chain_with_history: Chain with message history
+            chain_input: Input for the chain
+            config: Configuration for the chain
+            
+        Returns:
+            Generated answer
+        """
+        def _run_chain_sync():
+            return chain_with_history.invoke(chain_input, config=config)
+        
+        # Run the chain in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _run_chain_sync)
+
+    async def learn_from_pdf(self, student_id: str, pdf_id: str, question: str, 
+                  session_id: str = None, similarity_threshold: float = 0.75) -> Tuple[Dict, int]:
+        """Learn from a specific PDF document using RAG (async version).
         
         Args:
             student_id: ID of the student
             pdf_id: ID of the PDF document to learn from
             question: The user's question about the PDF content
             session_id: Optional session ID for chat history
+            similarity_threshold: Minimum similarity score for images (0-1, where lower is more similar for distance metrics)
             
         Returns:
-            Tuple of (answer, status_code)
+            Tuple of (response_data, status_code)
         """
         try:
             # Create a collection name specific to this PDF
             collection_name = f"pdf_{pdf_id}"
+            # Create collection name for images
+            images_collection_name = f"pdf_{pdf_id}_images"
             
             # Create student-specific connection string
             # Format: postgresql+psycopg://myuser:mypassword@localhost:5432/student_{user_id}
@@ -456,19 +592,8 @@ class LangchainService:
                 # Fallback: just use base connection
                 connection_string = base_connection
             
-            # Initialize PGVector with the student-specific connection
-            pdf_vector_store = PGVector(
-                embeddings=self.embeddings,
-                collection_name=collection_name,
-                connection=connection_string,
-                use_jsonb=True
-            )
-            
-            # Create a retriever from the vector store
-            pdf_retriever = pdf_vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 5})
-            
-            # Get relevant documents for the question
-            retrieved_docs = pdf_retriever.get_relevant_documents(question)
+            # Get relevant documents for the question (async)
+            retrieved_docs = await self._get_pdf_documents_async(student_id, question, connection_string, collection_name)
             
             # Extract content from retrieved documents
             context_content = [doc.page_content for doc in retrieved_docs]
@@ -478,31 +603,126 @@ class LangchainService:
             if not context:
                 return "I couldn't find relevant information in this PDF to answer your question. Please try a different question or check if the PDF has been processed correctly.", 404
             
-            # Create prompt template with context
+            # Find relevant images for the question (async)
+            relevant_image = await self._find_relevant_image_async(
+                connection_string, 
+                images_collection_name, 
+                question,
+                similarity_threshold
+            )
+            
+            # Create prompt template with context, history, and potential image reference
             prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are an educational assistant helping a student learn from a specific PDF document. "
                           "Use only the provided context from the PDF to answer the question. "
                           "If the answer isn't in the context, acknowledge this and suggest what might be relevant. "
+                          "If an image is provided, incorporate it into your explanation and mention that there's a visual reference available. "
                           "Keep your answers clear, educational, and directly related to the PDF content.\n\n"
                           "Context from the PDF:\n{context}"),
+                MessagesPlaceholder(variable_name="history"),
                 ("human", "{question}")
             ])
             
             # Create chain
             chain = prompt | self.ug_llm | StrOutputParser()
             
-            # Run chain with context
-            answer = chain.invoke({
+            # Prepare input for the chain
+            chain_input = {
                 "context": context,
                 "question": question
-            })
+            }
             
-            # Add to chat history if session ID is provided
+            # Create structured response
+            response = {
+                "answer": "",
+                "has_image": relevant_image is not None
+            }
+            
+            # Add image information to the response if available
+            if relevant_image:
+                response["image_url"] = relevant_image["image_url"]
+                response["image_caption"] = relevant_image["caption"]
+                response["image_page"] = relevant_image.get("page_number")
+            
+            # Run chain with history if session_id is provided, otherwise without history
             if session_id:
-                self.add_to_chat_history(student_id, session_id, question, is_ai=False)
-                self.add_to_chat_history(student_id, session_id, answer, is_ai=True)
+                # Create chain with message history
+                chain_with_history = RunnableWithMessageHistory(
+                    chain,
+                    self._get_pdf_session_history(student_id, pdf_id),
+                    input_messages_key="question",
+                    history_messages_key="history",
+                )
+                
+                # Configure session
+                config = {"configurable": {"session_id": session_id}}
+                
+                # Run chain with history (async)
+                answer = await self._run_pdf_chain_async(chain_with_history, chain_input, config)
+            else:
+                # Fallback: run without history if no session_id (async)
+                chain_input["history"] = []  # Empty history
+                answer = await self._run_chain_async(chain, chain_input)
             
-            return answer, 200
+            # Set the answer in response
+            response["answer"] = answer
+            
+            return response, 200
             
         except Exception as e:
-            return f"Error learning from PDF: {str(e)}", 500 
+            return f"Error learning from PDF: {str(e)}", 500
+            
+    def _find_relevant_image(self, connection_string: str, collection_name: str, query: str, similarity_threshold: float = 0.4) -> Optional[Dict]:
+        """Find a relevant image for the query from the image captions collection.
+        
+        Args:
+            connection_string: Connection string for the database
+            collection_name: Name of the image captions collection
+            query: The query to search for
+            similarity_threshold: Minimum similarity score required (lower scores mean more similar for distance metrics)
+            
+        Returns:
+            Dictionary with image information if found, None otherwise
+        """
+        try:
+            # Try to connect to the image captions collection
+            try:
+                image_vector_store = PGVector(
+                    embeddings=self.embeddings,
+                    collection_name=collection_name,
+                    connection=connection_string,
+                    use_jsonb=True
+                )
+                
+                # Perform similarity search to find relevant image
+                results = image_vector_store.similarity_search_with_score(
+                    query, 
+                    k=1  # Get the most relevant image
+                )
+                
+                if results and len(results) > 0:
+                    # Extract image information from the document and metadata
+                    doc, score = results[0]
+                    
+                    # Check if the similarity score meets the threshold
+                    # Note: For distance-based metrics, lower scores mean more similar
+                    # For PGVector, scores are typically distance metrics
+                    if score <= similarity_threshold:
+                        if doc.metadata and "image_url" in doc.metadata:
+                            return {
+                                "image_url": doc.metadata["image_url"],
+                                "caption": doc.page_content,
+                                "score": score,
+                                "page_number": doc.metadata.get("page_number")
+                            }
+                    else:
+                        print(f"Image found but similarity score {score} doesn't meet threshold {similarity_threshold}")
+                        return None
+            except Exception as e:
+                print(f"Error searching for images: {str(e)}")
+                return None
+                
+        except Exception as e:
+            print(f"Error finding relevant image: {str(e)}")
+            
+        return None 

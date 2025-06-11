@@ -14,6 +14,18 @@ redis_client = redis.from_url(settings.REDIS_URL)
 
 # Initialize FastAPI app
 app = FastAPI(title="Sahasra AI Education API")
+allow_origin_regex = (
+    r"^(https?:\/\/("
+    r"localhost:3000|"
+    r"localhost:3001|"
+    r"fastapi\.tiangolo\.com|"
+    r"sahasraai\.vercel\.app|"
+    r"www\.sahasra\.ai|"
+    r"questionbank-one\.vercel\.app|"
+    r"v0-sahas\.vercel\.app|"
+    r".+\.lite\.vusercontent\.net"
+    r"))$"
+)
 
 # Configure CORS
 app.add_middleware(
@@ -21,7 +33,7 @@ app.add_middleware(
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-    allow_headers=["X-Auth-Session", "Content-Type"],
+    allow_headers=["X-Auth-Session", "Content-Type","Content-Disposition","Cache-Control","Transfer-Encoding"],
     expose_headers=["X-Auth-Session"]
 )
 
@@ -78,8 +90,9 @@ def root():
 
 # Run the app with uvicorn if this file is executed directly
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    '''import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)'''
+    app.run(host="0.0.0.0", port=8000)
 
 
 

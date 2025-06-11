@@ -39,6 +39,7 @@ class NotificationService:
         
         try:
             response = requests.post(self.forwardemail_api_url, data=data)
+            print(f"Email sent to {to_email} with status code {response.status_code} and response {response.text}")
             return response.status_code == 200
         except Exception:
             return False

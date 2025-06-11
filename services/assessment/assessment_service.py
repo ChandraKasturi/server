@@ -7,6 +7,7 @@ import uuid
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from config import settings
 from repositories.mongo_repository import HistoryRepository, QuestionRepository
@@ -14,6 +15,9 @@ from repositories.postgres_text_repository import PostgresTextRepository
 from repositories.pdf_repository import PDFRepository
 from services.langchain.langchain_service import LangchainService
 from models.pdf_models import ProcessingStatus, QuestionType
+from langchain.embeddings import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_postgres.vectorstores import PGVector
 
 class AssessmentService:
     """Service for handling assessment-related operations."""
@@ -27,141 +31,215 @@ class AssessmentService:
         self.postgres_text_repository = PostgresTextRepository()
         self.llm = ChatOpenAI(api_key=settings.OPENAI_API_KEY)
         self.ug_llm = ChatOpenAI(api_key=settings.OPENAI_API_KEY, model="gpt-4o")
+        '''self.llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")
+        self.ug_llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")'''
     
-    def check_assessment_content(self, content: str, session_id: str, student_id: str) -> Tuple[Dict, int]:
-        """Check if input text is requesting an assessment and process accordingly.
+    def check_assessment_content(self, subject: str, topic: str = None, topics: List[str] = None, subtopic: Optional[str] = None, 
+                            level: int = 1, num_questions: int = 5, 
+                            session_id: Optional[str] = None, student_id: str = None,
+                            question_types: List[str] = None) -> Tuple[Dict, int]:
+        """Generate assessment questions based on the provided parameters.
         
         Args:
-            content: Input text from the user
+            subject: Subject for the questions
+            topic: Single topic within the subject (legacy parameter, use topics instead)
+            topics: List of topics within the subject
+            subtopic: Optional subtopic within the topic
+            level: Difficulty level (1-5)
+            num_questions: Number of questions to generate
             session_id: JWT token from X-Auth-Session to use as conversation ID
             student_id: ID of the student
+            question_types: List of question types to generate (e.g., ["MCQ", "DESCRIPTIVE"])
+                           If None or empty, defaults to ["MCQ"]
             
         Returns:
             Tuple of (result_data, status_code)
         """
         try:
-            # Check if content contains the word "Assessment"
-            check_prompt = PromptTemplate.from_template(
-                "Answer Only AS YES OR NO IN CAPTIALS Answer whether the following statement contains the "
-                "word case insensitive 'Assessment' : \n Statement:{statement}"
-            )
-            check_chain = check_prompt | self.llm | StrOutputParser()
-            assessment_check = check_chain.invoke({"statement": content})
-            
-            if assessment_check != "YES":
-                # Not an assessment request
-                # Try to answer using LangChain
-                answer, status_code = self.langchain_service.answer_question(
-                    content, 
-                    student_id,
-                    session_id
-                )
+            # Handle both single topic and topics list
+            topic_list = []
+            if topics:
+                topic_list = topics
+            elif topic:
+                topic_list = [topic]
                 
-                if status_code == 200:
-                    return {"answer": answer}, 200
-                else:
-                    return {"Message": "Not an assessment request"}, 400
-            
-            # Parse what subjects/topics to assess on
-            json_structure = [i for i in self.question_repo.get_all_topics_subtopics()]
-            
-            get_final_json_prompt = PromptTemplate.from_template(
-                "Given The Question Produce a correct JSON containing a key called questions which "
-                "contains an array of json which in turn has subject,topic,subtopic,level,NumberOfQuestions "
-                "for each subject from the Question Keep the Default value for NumberOfQuestions as 5 and "
-                "Default Level as 1 if not found in the Question and the omit and remove fields and remove "
-                "the keys too from json do not keep them as empty or null if not found in the question "
-                "remove the fields and keys completely\n Question: {question}"
-            )
-            get_final_json_chain = get_final_json_prompt | self.llm | StrOutputParser()
-            json_with_questions = get_final_json_chain.invoke({"question": content})
-            
-            # Parse the JSON
-            try:
-                assessment_data = json.loads(json_with_questions)
-                questions_list = assessment_data.get("questions", [])
-            except (json.JSONDecodeError, TypeError):
-                # Fallback to empty list if JSON is invalid
-                questions_list = []
-            
-            if not questions_list:
-                return {"Message": "Failed to parse assessment request"}, 400
-            
-            # Generate questions for each subject/topic
-            final_questions = []
-            
-            for question_spec in questions_list:
-                subject = question_spec.get("subject")
-                topic = question_spec.get("topic")
-                subtopic = question_spec.get("subtopic", topic)
-                level = question_spec.get("level", 1)
-                num_questions = question_spec.get("NumberOfQuestions", 5)
+            if not topic_list:
+                return {"message": "At least one topic must be provided"}, 400
                 
-                # Find matching questions in the database
-                query = {
+            # Default to MCQ if no question types are provided
+            if not question_types:
+                question_types = ["MCQ"]
+            
+            # Convert all question types to uppercase for consistency
+            question_types = [qt.upper() for qt in question_types]
+            
+            # Validate question types
+            valid_types = ["MCQ", "DESCRIPTIVE", "FILL_BLANKS", "TRUEFALSE"]
+            question_types = [qt for qt in question_types if qt in valid_types]
+            
+            # Default to MCQ if all provided types were invalid
+            if not question_types:
+                question_types = ["MCQ"]
+            
+            # Find matching questions in the database
+            db_questions = []
+            
+            # Distribute questions evenly among topics
+            questions_per_topic = self._distribute_questions_among_topics(topic_list, num_questions)
+            
+            # Get questions for each topic
+            for topic_name, topic_question_count in questions_per_topic.items():
+                # Find matching questions for this topic
+                base_query = {
                     "subject": subject,
-                    "topic": topic
+                    "topic": topic_name,
                 }
                 
                 if subtopic:
-                    query["subtopic"] = subtopic
+                    base_query["subtopic"] = subtopic
                     
                 if level:
-                    query["level"] = str(level)
+                    base_query["level"] = str(level)
                 
-                # Get questions from the database
-                db_questions = self.question_repo.find_questions(
-                    query=query,
-                    limit=num_questions
+                # If we have only one question type, fetch all questions of that type
+                if len(question_types) == 1:
+                    query = base_query.copy()
+                    query["question_type"] = question_types[0]
+                    
+                    topic_questions = self.question_repo.find_questions(
+                        query=query,
+                        limit=topic_question_count
+                    )
+                    db_questions.extend(topic_questions)
+                else:
+                    # For multiple types, distribute questions evenly among types
+                    import random
+                    
+                    # Shuffle the types to ensure a random order
+                    types_to_use = question_types.copy()
+                    random.shuffle(types_to_use)
+                    
+                    # Calculate questions per type (at least 1 per type if possible)
+                    questions_per_type = {}
+                    remaining = topic_question_count
+                    
+                    # Initial distribution - at least 1 per type if possible
+                    for q_type in types_to_use:
+                        if remaining > 0:
+                            questions_per_type[q_type] = 1
+                            remaining -= 1
+                        else:
+                            questions_per_type[q_type] = 0
+                    
+                    # Distribute remaining questions randomly
+                    while remaining > 0:
+                        q_type = random.choice(types_to_use)
+                        questions_per_type[q_type] += 1
+                        remaining -= 1
+                    
+                    # Fetch questions for each type according to distribution
+                    for q_type, count in questions_per_type.items():
+                        if count > 0:
+                            query = base_query.copy()
+                            query["question_type"] = q_type
+                            
+                            type_questions = self.question_repo.find_questions(
+                                query=query,
+                                limit=count
+                            )
+                            
+                            db_questions.extend(type_questions)
+            
+            # If not enough questions, generate some using LLM
+            if len(db_questions) < num_questions:
+                # Number of questions to generate
+                num_to_generate = num_questions - len(db_questions)
+                
+                # Distribute remaining questions to generate among topics
+                remaining_questions_per_topic = self._distribute_questions_among_topics(
+                    topic_list, 
+                    num_to_generate
                 )
                 
-                # If not enough questions, generate some using LLM
-                if len(db_questions) < num_questions:
-                    # Number of questions to generate
-                    num_to_generate = num_questions - len(db_questions)
-                    
-                    # Generate questions
-                    generated_questions = self._generate_questions(
-                        subject, topic, subtopic, level, num_to_generate
-                    )
-                    
-                    # Add generated questions
-                    db_questions.extend(generated_questions)
-                
-                # Add to final list
-                final_questions.extend(db_questions)
+                # Generate questions for each topic
+                for topic_name, topic_question_count in remaining_questions_per_topic.items():
+                    if topic_question_count > 0:
+                        subtopic_to_use = subtopic or topic_name
+                        generated_questions = self._generate_questions(
+                            subject, topic_name, subtopic_to_use, level, topic_question_count, question_types
+                        )
+                        db_questions.extend(generated_questions)
             
             # Create assessment object
             assessment = {
-                "questions": final_questions,
+                "questions": db_questions,
                 "student_id": student_id,
                 "timestamp": datetime.utcnow(),
-                "original_query": content,
-                "session_id": session_id
+                "session_id": session_id,
+                "question_types": question_types,
+                "subject": subject,
+                "topics": topic_list,  # Store all topics
+                "level": level
             }
             
             # Store assessment
             assessment_id = self.history_repo.add_assessment(student_id, assessment)
             
-            # Add this interaction to chat history
-            self.langchain_service.add_to_chat_history(
-                student_id, 
-                session_id, 
-                f"Generated assessment with ID: {assessment_id}"
-            )
+            # Add this interaction to chat history if session_id is provided
+            if session_id:
+                self.langchain_service.add_to_chat_history(
+                    student_id, 
+                    session_id, 
+                    f"Generated assessment with ID: {assessment_id}"
+                )
             
             # Return assessment data
             return {
-                "Message": "Assessment generated successfully",
+                "message": "Assessment generated successfully",
                 "assessment_id": assessment_id,
-                "questions": final_questions
+                "questions": db_questions
             }, 200
             
         except Exception as e:
-            return {"Message": f"Error processing assessment request: {str(e)}"}, 500
+            return {"message": f"Error processing assessment request: {str(e)}"}, 500
+    
+    def _distribute_questions_among_topics(self, topics: List[str], num_questions: int) -> Dict[str, int]:
+        """Distribute questions evenly among multiple topics.
+        
+        Args:
+            topics: List of topics
+            num_questions: Total number of questions to distribute
+            
+        Returns:
+            Dictionary mapping topics to number of questions
+        """
+        import random
+        
+        # Create a copy of topics to avoid modifying the original
+        topics_to_use = topics.copy()
+        random.shuffle(topics_to_use)
+        
+        # Initial distribution - assign at least 1 question per topic if possible
+        questions_per_topic = {}
+        remaining = num_questions
+        
+        for topic in topics_to_use:
+            if remaining > 0:
+                questions_per_topic[topic] = 1
+                remaining -= 1
+            else:
+                questions_per_topic[topic] = 0
+        
+        # Distribute remaining questions randomly
+        while remaining > 0:
+            topic = random.choice(topics_to_use)
+            questions_per_topic[topic] += 1
+            remaining -= 1
+            
+        return questions_per_topic
     
     def _generate_questions(self, subject: str, topic: str, subtopic: str, level: int, 
-                           num_questions: int) -> List[Dict]:
+                           num_questions: int, question_types: List[str] = None) -> List[Dict]:
         """Generate questions using AI.
         
         Args:
@@ -170,25 +248,221 @@ class AssessmentService:
             subtopic: Subtopic of the questions
             level: Difficulty level of the questions
             num_questions: Number of questions to generate
+            question_types: List of question types to generate (e.g., ["MCQ", "DESCRIPTIVE"])
             
         Returns:
             List of generated questions
         """
-        # Construct prompt
-        generate_prompt = PromptTemplate.from_template(
-            "Generate {num_questions} multiple-choice questions about {subject}, specifically on the "
-            "topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty "
-            "level {level} (where 1 is easiest and 5 is hardest).\n\n"
-            "For each question, provide:\n"
-            "1. The question text\n"
-            "2. Four options (option1, option2, option3, option4)\n"
-            "3. The correct answer (as option1, option2, option3, or option4)\n"
-            "4. A brief explanation of the answer\n\n"
-            "Format your response as a JSON array of objects, where each object has the fields: "
-            "question, option1, option2, option3, option4, correctanswer, explaination.\n\n"
-            "Make sure the questions are factually accurate and educational."
-        )
+        # Default to MCQ if no question types are provided
+        if not question_types:
+            question_types = ["MCQ"]
+            
+        # Convert all question types to uppercase for consistency
+        question_types = [qt.upper() for qt in question_types]
         
+        # Validate question types
+        valid_types = ["MCQ", "DESCRIPTIVE", "FILL_BLANKS", "TRUEFALSE"]
+        question_types = [qt for qt in question_types if qt in valid_types]
+        
+        # Default to MCQ if all provided types were invalid
+        if not question_types:
+            question_types = ["MCQ"]
+        
+        # Generate questions for all the requested types
+        all_questions = []
+        
+        # If we have only one question type, generate all questions of that type
+        if len(question_types) == 1:
+            all_questions = self._generate_questions_of_type(
+                subject, topic, subtopic, level, num_questions, question_types[0]
+            )
+        else:
+            # Distribute questions among the types
+            # We'll use a simple random approach to distribute the questions
+            import random
+            
+            # Shuffle the types to ensure a random distribution
+            types_to_use = question_types.copy()
+            random.shuffle(types_to_use)
+            
+            questions_per_type = {}
+            remaining = num_questions
+            
+            # Initial distribution - at least 1 per type if possible
+            for q_type in types_to_use:
+                if remaining > 0:
+                    questions_per_type[q_type] = 1
+                    remaining -= 1
+                else:
+                    questions_per_type[q_type] = 0
+            
+            # Distribute remaining questions randomly
+            while remaining > 0:
+                q_type = random.choice(types_to_use)
+                questions_per_type[q_type] += 1
+                remaining -= 1
+            
+            # Generate questions for each type
+            for q_type, count in questions_per_type.items():
+                if count > 0:
+                    type_questions = self._generate_questions_of_type(
+                        subject, topic, subtopic, level, count, q_type
+                    )
+                    all_questions.extend(type_questions)
+                    
+        return all_questions
+    
+    def _generate_questions_of_type(self, subject: str, topic: str, subtopic: str, 
+                                   level: int, num_questions: int, question_type: str) -> List[Dict]:
+        """Generate questions of a specific type.
+        
+        Args:
+            subject: Subject of the questions
+            topic: Topic of the questions
+            subtopic: Subtopic of the questions
+            level: Difficulty level of the questions
+            num_questions: Number of questions to generate
+            question_type: Type of questions to generate (MCQ, DESCRIPTIVE, FILL_BLANKS, or TRUEFALSE)
+            
+        Returns:
+            List of generated questions
+        """
+        # Create prompt based on question type
+        if question_type == "MCQ":
+            prompt_template = """
+            You are an expert educator. Generate {num_questions} multiple-choice questions about {subject}, specifically on the 
+            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
+            level {level} (where 1 is easiest and 5 is hardest).
+            
+            For each question:
+            1. Create a challenging but fair question
+            2. Provide four options (A, B, C, D)
+            3. Indicate the correct answer
+            4. Include a brief explanation of why the answer is correct
+            
+            Format your response as a JSON array of objects with the following structure:
+            [
+              {{
+                "question": "The question text",
+                "option1": "Option A",
+                "option2": "Option B",
+                "option3": "Option C",
+                "option4": "Option D",
+                "correctanswer": "option1, option2, option3, or option4",
+                "explaination": "Explanation of the correct answer",
+                "question_type": "MCQ"
+              }},
+              // more questions...
+            ]
+            
+            Make sure the questions test understanding of key concepts, not just trivial details.
+            """
+        elif question_type == "DESCRIPTIVE":
+            prompt_template = """
+            You are an expert educator. Generate {num_questions} descriptive questions about {subject}, specifically on the 
+            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
+            level {level} (where 1 is easiest and 5 is hardest).
+            
+            For each question:
+            1. Create a thought-provoking question that requires explanation or analysis
+            2. Provide a model answer that would receive full marks
+            3. Include grading criteria or key points that should be included in a good answer
+            
+            Format your response as a JSON array of objects with the following structure:
+            [
+              {{
+                "question": "The question text",
+                "model_answer": "A comprehensive model answer",
+                "grading_criteria": "Key points that should be included",
+                "question_type": "DESCRIPTIVE",
+                "explaination": "Brief explanation about the question and its importance"
+              }},
+              // more questions...
+            ]
+            
+            Make sure the questions test deep understanding and critical thinking.
+            """
+        elif question_type == "FILL_BLANKS":
+            prompt_template = """
+            You are an expert educator. Generate {num_questions} fill-in-the-blank questions about {subject}, specifically on the 
+            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
+            level {level} (where 1 is easiest and 5 is hardest).
+            
+            For each question:
+            1. Create a sentence or paragraph with key terms removed and replaced with blanks
+            2. Provide the correct answers for each blank
+            3. Include a brief explanation for why these answers are correct
+            
+            Format your response as a JSON array of objects with the following structure:
+            [
+              {{
+                "question": "The sentence with blanks indicated by _____",
+                "answers": ["Answer for blank 1", "Answer for blank 2", ...],
+                "explaination": "Explanation of the correct answers",
+                "question_type": "FILL_BLANKS"
+              }},
+              // more questions...
+            ]
+            
+            Make sure the blanks focus on important terminology or concepts.
+            """
+        elif question_type == "TRUEFALSE":
+            prompt_template = """
+            You are an expert educator. Generate {num_questions} true/false questions about {subject}, specifically on the 
+            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
+            level {level} (where 1 is easiest and 5 is hardest).
+            
+            For each question:
+            1. Create a challenging but clear statement that is either true or false
+            2. Indicate whether the statement is true or false
+            3. Include a brief explanation of why the statement is true or false
+            
+            Format your response as a JSON array of objects with the following structure:
+            [
+              {{
+                "question": "The statement to evaluate as true or false",
+                "correct_answer": "true or false (lowercase)",
+                "explaination": "Explanation of why the statement is true or false",
+                "question_type": "TRUEFALSE"
+              }},
+              // more questions...
+            ]
+            
+            Make sure the questions test understanding of key concepts, not just trivial details.
+            """
+        else:
+            # Default to MCQ if the type is not recognized
+            question_type = "MCQ"
+            prompt_template = """
+            You are an expert educator. Generate {num_questions} multiple-choice questions about {subject}, specifically on the 
+            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
+            level {level} (where 1 is easiest and 5 is hardest).
+            
+            For each question:
+            1. Create a challenging but fair question
+            2. Provide four options (A, B, C, D)
+            3. Indicate the correct answer
+            4. Include a brief explanation of why the answer is correct
+            
+            Format your response as a JSON array of objects with the following structure:
+            [
+              {{
+                "question": "The question text",
+                "option1": "Option A",
+                "option2": "Option B",
+                "option3": "Option C",
+                "option4": "Option D",
+                "correctanswer": "option1, option2, option3, or option4",
+                "explaination": "Explanation of the correct answer",
+                "question_type": "MCQ"
+              }},
+              // more questions...
+            ]
+            
+            Make sure the questions test understanding of key concepts, not just trivial details.
+            """
+        
+        generate_prompt = PromptTemplate.from_template(prompt_template)
         generate_chain = generate_prompt | self.ug_llm | StrOutputParser()
         
         questions_json = generate_chain.invoke({
@@ -201,7 +475,7 @@ class AssessmentService:
         
         try:
             # Parse generated questions
-            questions = json.loads(questions_json)
+            questions = json.loads(questions_json.replace("```json", "").replace("```", ""))
             
             # Ensure proper structure and add metadata
             for q in questions:
@@ -211,17 +485,113 @@ class AssessmentService:
                 q["level"] = str(level)
                 q["questionset"] = "generated"
                 q["marks"] = "1"  # Default mark
+                q["created_at"] = datetime.utcnow().isoformat()
                 
-                # Ensure all required fields exist
-                required_fields = ["question", "option1", "option2", "option3", "option4", 
-                                  "correctanswer", "explaination"]
-                for field in required_fields:
-                    if field not in q:
-                        q[field] = ""
+                # Set required fields based on question type
+                q_type = q.get("question_type", question_type).upper()
+                
+                if q_type == "MCQ":
+                    required_fields = ["question", "option1", "option2", "option3", "option4", 
+                                      "correctanswer", "explaination"]
+                    for field in required_fields:
+                        if field not in q:
+                            q[field] = ""
+                
+                elif q_type == "DESCRIPTIVE":
+                    required_fields = ["question", "model_answer", "grading_criteria", "explaination"]
+                    for field in required_fields:
+                        if field not in q:
+                            q[field] = ""
+                
+                elif q_type == "FILL_BLANKS":
+                    if "question" not in q:
+                        q["question"] = ""
+                    if "explaination" not in q:
+                        q["explaination"] = ""
+                    if "answers" not in q:
+                        q["answers"] = []
+                
+                elif q_type == "TRUEFALSE":
+                    if "question" not in q:
+                        q["question"] = ""
+                    if "correct_answer" not in q:
+                        q["correct_answer"] = "true"
+                    if "explaination" not in q:
+                        q["explaination"] = ""
+                    
+                    # Ensure the correct_answer is lowercase (true or false)
+                    if isinstance(q.get("correct_answer"), str):
+                        q["correct_answer"] = q["correct_answer"].lower()
+                
+                # Ensure question_type is included
+                if "question_type" not in q:
+                    q["question_type"] = question_type
+                
+                # Insert question into question bank
+                try:
+                    # Create a copy of the question for insertion to avoid modifying the original
+                    question_copy = q.copy()
+                    
+                    # Insert into question bank
+                    success = self.question_repo.insert_question(question_copy)
+                    
+                    if success:
+                        # If insertion was successful, the _id field was added to question_copy
+                        # Add it to original question
+                        if '_id' in question_copy:
+                            q['id'] = str(question_copy['_id'])
+                    else:
+                        print(f"Failed to insert question into question bank: {q['question']}")
+                except Exception as e:
+                    print(f"Error inserting question into question bank: {str(e)}")
             
             return questions
-        except (json.JSONDecodeError, TypeError):
-            # Return empty list if generation fails
+        except (json.JSONDecodeError, TypeError) as e:
+            print(f"Error parsing generated questions: {str(e)}")
+            # If JSON parsing fails, try to extract JSON using basic pattern matching
+            try:
+                # Find JSON array in the text
+                start_idx = questions_json.find('[')
+                end_idx = questions_json.rfind(']') + 1
+                if start_idx >= 0 and end_idx > start_idx:
+                    extracted_json = questions_json[start_idx:end_idx]
+                    questions = json.loads(extracted_json)
+                    
+                    # Process questions as above
+                    for q in questions:
+                        q["subject"] = subject
+                        q["topic"] = topic
+                        q["subtopic"] = subtopic
+                        q["level"] = str(level)
+                        q["questionset"] = "generated"
+                        q["marks"] = "1"  # Default mark
+                        q["created_at"] = datetime.utcnow().isoformat()
+                        
+                        # Ensure question_type is included
+                        if "question_type" not in q:
+                            q["question_type"] = question_type
+                            
+                        # Insert question into question bank
+                        try:
+                            # Create a copy of the question for insertion to avoid modifying the original
+                            question_copy = q.copy()
+                            
+                            # Insert into question bank
+                            success = self.question_repo.insert_question(question_copy)
+                            
+                            if success:
+                                # If insertion was successful, the _id field was added to question_copy
+                                # Add it to original question
+                                if '_id' in question_copy:
+                                    q['id'] = str(question_copy['_id'])
+                        except Exception as e:
+                            print(f"Error inserting question into question bank: {str(e)}")
+                    
+                    return questions
+            except:
+                pass
+            
+            # Return empty list if all parsing attempts fail
             return []
     
     def submit_assessment(self, assessment_id: str, student_answers: List[Dict], student_id: str) -> Tuple[Dict, int]:
@@ -245,6 +615,7 @@ class AssessmentService:
                 
             # Get questions from the assessment
             assessment_questions = assessment.get("questions", [])
+            print(f"Assessment questions: {assessment_questions}")
             
             # Create a dictionary of questions by ID for faster lookup
             questions_by_id = {}
@@ -279,6 +650,9 @@ class AssessmentService:
                     }
                     results.append(result)
                     continue
+                
+                # Store student's answer in the question object
+                question["student_answer"] = student_answer
                 
                 # Check answer based on question type
                 question_type = question.get("question_type", "MCQ")
@@ -329,6 +703,9 @@ class AssessmentService:
                         score = evaluation.get("score", 0)
                         feedback = evaluation.get("feedback", "")
                         
+                        # Store the score in the question object
+                        question["score"] = score
+                        
                         # Consider correct if score is above 70%
                         is_correct = score >= 70
                     except json.JSONDecodeError:
@@ -361,10 +738,30 @@ class AssessmentService:
                         else:
                             feedback = question.get("explanation", "Some answers are incorrect.")
                 
+                elif question_type == "TRUEFALSE":
+                    # For true/false questions
+                    correct_answer = question.get("correct_answer", "").lower()
+                    student_answer_normalized = student_answer.lower().strip()
+                    
+                    # Handle various forms of true/false answers
+                    is_true = student_answer_normalized in ["true", "t", "yes", "y", "1"]
+                    is_false = student_answer_normalized in ["false", "f", "no", "n", "0"]
+                    
+                    if (is_true and correct_answer == "true") or (is_false and correct_answer == "false"):
+                        is_correct = True
+                        feedback = question.get("explanation", "Correct answer!")
+                    else:
+                        is_correct = False
+                        feedback = question.get("explanation", "Incorrect answer.")
+                
                 else:
                     # Default handling for unknown question types
                     is_correct = False
                     feedback = "Unknown question type."
+                
+                # Store evaluation result in the question object
+                question["is_correct"] = is_correct
+                question["feedback"] = feedback
                 
                 # Add result for this question
                 result = {
@@ -391,14 +788,16 @@ class AssessmentService:
                 "score_percentage": score_percentage
             }
             
-            # Update assessment with results (optional)
+            # Update assessment with results and update questions with student answers
+            print(f"Assessment questions before update: {assessment_questions}")
             self.history_repo.update_assessment(
                 student_id,
                 assessment_id,
                 {
                     "last_submission": assessment_result,
                     "submission_count": assessment.get("submission_count", 0) + 1,
-                    "last_submission_time": datetime.utcnow()
+                    "last_submission_time": datetime.utcnow(),
+                    "questions": assessment_questions  # Update questions with student answers
                 }
             )
             
@@ -407,12 +806,14 @@ class AssessmentService:
         except Exception as e:
             return {"Message": f"Error submitting assessment: {str(e)}"}, 500
     
-    def get_assessments(self, student_id: str, time_str: Optional[str] = None) -> Tuple[List[Dict], int]:
+    def get_assessments(self, student_id: str, time_str: Optional[str] = None, subject: Optional[str] = None, topic: Optional[str] = None) -> Tuple[List[Dict], int]:
         """Get a student's assessments.
         
         Args:
             student_id: ID of the student
             time_str: Optional time string to filter assessments
+            subject: Optional subject to filter assessments
+            topic: Optional topic to filter assessments
             
         Returns:
             Tuple of (assessments, status_code)
@@ -431,10 +832,27 @@ class AssessmentService:
                 from_date = datetime.utcnow() - timedelta(weeks=1)
             
             # Get assessments
-            assessments = self.history_repo.get_assessments(student_id, from_date)
+            assessments = self.history_repo.get_assessments(student_id, from_date, subject, topic)
+            
+            # Ensure each assessment has a 'topics' field
+            for assessment in assessments:
+                if 'topics' not in assessment:
+                    if 'topic' in assessment:
+                        assessment['topics'] = [assessment['topic']]
+                    else:
+                        # Try to extract topics from the questions
+                        topics = set()
+                        for question in assessment.get('questions', []):
+                            if 'topic' in question:
+                                topics.add(question['topic'])
+                        
+                        if topics:
+                            assessment['topics'] = list(topics)
+                        else:
+                            assessment['topics'] = []
             
             return assessments, 200
-        except Exception:
+        except Exception as e:
             return [], 500
     
     def get_assessment_by_id(self, student_id: str, assessment_id: str) -> Tuple[Dict, int]:
@@ -452,6 +870,23 @@ class AssessmentService:
             
             if not assessment:
                 return {"Message": "Assessment not found"}, 404
+            
+            # Ensure 'topics' field exists in the assessment
+            if 'topics' not in assessment:
+                # If assessment has a single 'topic' field, convert it to list format
+                if 'topic' in assessment:
+                    assessment['topics'] = [assessment['topic']]
+                else:
+                    # Check if any topic info is in the questions
+                    topics = set()
+                    for question in assessment.get('questions', []):
+                        if 'topic' in question:
+                            topics.add(question['topic'])
+                    
+                    if topics:
+                        assessment['topics'] = list(topics)
+                    else:
+                        assessment['topics'] = []
                 
             return assessment, 200
         except Exception:
@@ -488,20 +923,36 @@ class AssessmentService:
             return [], 500
     
     def generate_assessment_from_pdf(self, pdf_id: str, student_id: str, 
-                                     question_type: str = "MIXED", 
+                                     question_types: List[str] = None, 
                                      num_questions: int = 10) -> Tuple[Dict, int]:
         """Generate assessment questions from a PDF document.
         
         Args:
             pdf_id: ID of the PDF document
             student_id: ID of the student
-            question_type: Type of questions to generate (MCQ, DESCRIPTIVE, FILL_BLANKS, or MIXED)
+            question_types: List of question types to generate (e.g., ["MCQ", "DESCRIPTIVE"])
+                           If None or empty, defaults to ["MCQ"]
             num_questions: Number of questions to generate
             
         Returns:
             Tuple of (assessment_data, status_code)
         """
         try:
+            # Default to MCQ if no question types are provided
+            if not question_types:
+                question_types = ["MCQ"]
+                
+            # Convert all question types to uppercase for consistency
+            question_types = [qt.upper() for qt in question_types]
+            
+            # Validate question types
+            valid_types = ["MCQ", "DESCRIPTIVE", "FILL_BLANKS", "TRUEFALSE"]
+            question_types = [qt for qt in question_types if qt in valid_types]
+            
+            # Default to MCQ if all provided types were invalid
+            if not question_types:
+                question_types = ["MCQ"]
+            
             # Get PDF document
             pdf_document = self.pdf_repository.get_pdf_document(pdf_id)
             
@@ -522,12 +973,6 @@ class AssessmentService:
             if not pdf_text or not pdf_text.get('content'):
                 return {"Message": "PDF text not found or is empty"}, 404
             
-            # Validate question type
-            question_type = question_type.upper()
-            valid_types = ["MCQ", "DESCRIPTIVE", "FILL_BLANKS", "MIXED"]
-            if question_type not in valid_types:
-                question_type = "MIXED"
-            
             # Limit the number of questions to a reasonable range
             num_questions = max(1, min(num_questions, 20))
             
@@ -535,8 +980,10 @@ class AssessmentService:
             questions = self._generate_questions_from_pdf(
                 pdf_text['content'],
                 pdf_document.title,
-                question_type,
-                num_questions
+                question_types,
+                num_questions,
+                pdf_id,
+                student_id
             )
             
             if not questions:
@@ -545,7 +992,6 @@ class AssessmentService:
             # Add metadata to questions
             for q in questions:
                 q["pdf_id"] = pdf_id
-                q["question_type"] = q.get("question_type", question_type)
                 q["generated_at"] = datetime.utcnow().isoformat()
                 q["id"] = str(uuid.uuid4())
             
@@ -559,7 +1005,7 @@ class AssessmentService:
                 "student_id": student_id,
                 "created_at": datetime.utcnow(),
                 "question_count": len(questions),
-                "question_type": question_type
+                "question_types": question_types
             }
             
             # Store assessment in MongoDB
@@ -576,14 +1022,16 @@ class AssessmentService:
             return {"Message": f"Error generating assessment: {str(e)}"}, 500
     
     def _generate_questions_from_pdf(self, content: str, pdf_title: str, 
-                                    question_type: str, num_questions: int) -> List[Dict]:
+                                    question_types: List[str], num_questions: int, pdf_id: str = None, student_id: str = None) -> List[Dict]:
         """Generate questions from PDF content.
         
         Args:
             content: Text content of the PDF
             pdf_title: Title of the PDF
-            question_type: Type of questions to generate
+            question_types: List of question types to generate
             num_questions: Number of questions to generate
+            pdf_id: ID of the PDF document (for image retrieval)
+            student_id: ID of the student (for image retrieval)
             
         Returns:
             List of generated questions
@@ -592,6 +1040,71 @@ class AssessmentService:
         max_tokens = 12000  # Limit to avoid context length issues
         content = content[:max_tokens] if len(content) > max_tokens else content
         
+        # Generate questions for all the requested types
+        all_questions = []
+        
+        # If we have only one question type, generate all questions of that type
+        if len(question_types) == 1:
+            all_questions = self._generate_questions_of_type_from_pdf(
+                content, pdf_title, question_types[0], num_questions, pdf_id, student_id
+            )
+        else:
+            # Distribute questions among the types
+            # We'll use a simple random approach to distribute the questions
+            import random
+            
+            # Shuffle the types to ensure a random distribution
+            types_to_use = question_types.copy()
+            random.shuffle(types_to_use)
+            
+            questions_per_type = {}
+            remaining = num_questions
+            
+            # Initial distribution - at least 1 per type if possible
+            for q_type in types_to_use:
+                if remaining > 0:
+                    questions_per_type[q_type] = 1
+                    remaining -= 1
+                else:
+                    questions_per_type[q_type] = 0
+            
+            # Distribute remaining questions randomly
+            while remaining > 0:
+                q_type = random.choice(types_to_use)
+                questions_per_type[q_type] += 1
+                remaining -= 1
+            
+            # Generate questions for each type
+            for q_type, count in questions_per_type.items():
+                if count > 0:
+                    type_questions = self._generate_questions_of_type_from_pdf(
+                        content, pdf_title, q_type, count, pdf_id, student_id
+                    )
+                    all_questions.extend(type_questions)
+                
+        # If we have a PDF ID and student ID, try to find relevant images for each question
+        if pdf_id and student_id and all_questions:
+            # Add relevant images to each question
+            all_questions = self._add_images_to_questions(all_questions, pdf_id, student_id)
+            
+        return all_questions
+            
+    def _generate_questions_of_type_from_pdf(self, content: str, pdf_title: str, 
+                                           question_type: str, num_questions: int, 
+                                           pdf_id: str = None, student_id: str = None) -> List[Dict]:
+        """Generate questions of a specific type from PDF content.
+        
+        Args:
+            content: Text content of the PDF
+            pdf_title: Title of the PDF
+            question_type: Type of questions to generate
+            num_questions: Number of questions to generate
+            pdf_id: ID of the PDF document (for image retrieval)
+            student_id: ID of the student (for image retrieval)
+            
+        Returns:
+            List of generated questions
+        """
         # Create prompt based on question type
         if question_type == "MCQ":
             prompt_template = """
@@ -606,11 +1119,15 @@ class AssessmentService:
             3. Indicate the correct answer
             4. Include a brief explanation of why the answer is correct
             
+            
             Format your response as a JSON array of objects with the following structure:
             [
               {{
                 "question": "The question text",
-                "options": ["Option A", "Option B", "Option C", "Option D"],
+                "option1": "Option A",
+                "option2": "Option B",
+                "option3": "Option C",
+                "option4": "Option D",
                 "correct_option": "The letter of the correct option (A, B, C, or D)",
                 "explanation": "Explanation of the correct answer",
                 "question_type": "MCQ"
@@ -670,59 +1187,63 @@ class AssessmentService:
             
             Make sure the blanks focus on important terminology or concepts from the text.
             """
-        else:  # MIXED type
+        elif question_type == "TRUEFALSE":
             prompt_template = """
-            You are an expert educator. Generate {num_questions} questions of mixed types based on the following text from the document titled "{pdf_title}".
+            You are an expert educator. Generate {num_questions} true/false questions based on the following text from the document titled "{pdf_title}".
             
             Text content:
             {content}
             
-            Create a mix of:
-            - Multiple-choice questions (MCQ)
-            - Descriptive questions (DESCRIPTIVE)
-            - Fill-in-the-blank questions (FILL_BLANKS)
+            For each question:
+            1. Create a challenging but clear statement that is either true or false based on the text
+            2. Indicate whether the statement is true or false
+            3. Include a brief explanation of why the statement is true or false
             
-            For multiple-choice questions, include:
-            - The question text
-            - Four options (A, B, C, D)
-            - The correct answer
-            - An explanation
-            
-            For descriptive questions, include:
-            - The question text
-            - A model answer
-            - Grading criteria
-            
-            For fill-in-the-blank questions, include:
-            - A sentence with blanks (marked as _____)
-            - The correct answers for each blank
-            - An explanation
-            
-            Format your response as a JSON array of objects with different structures based on type:
+            Format your response as a JSON array of objects with the following structure:
             [
               {{
-                "question": "MCQ question text",
-                "options": ["Option A", "Option B", "Option C", "Option D"],
-                "correct_option": "A/B/C/D",
-                "explanation": "Explanation",
-                "question_type": "MCQ"
-              }},
-              {{
-                "question": "Descriptive question text",
-                "model_answer": "Model answer",
-                "grading_criteria": "Criteria",
-                "question_type": "DESCRIPTIVE"
-              }},
-              {{
-                "question": "Fill in: _____",
-                "answers": ["Answer"],
-                "explanation": "Explanation",
-                "question_type": "FILL_BLANKS"
+                "question": "The statement to evaluate as true or false",
+                "correct_answer": "true or false (lowercase)",
+                "explanation": "Explanation of why the statement is true or false",
+                "question_type": "TRUEFALSE"
               }},
               // more questions...
             ]
             
-            Aim for roughly equal distribution of question types.
+            Make sure the statements are substantive and test important concepts from the text.
+            """
+        else:
+            # Default to MCQ if the type is not recognized
+            question_type = "MCQ"
+            prompt_template = """
+            You are an expert educator. Generate {num_questions} multiple-choice questions based on the following text from the document titled "{pdf_title}".
+            
+            Text content:
+            {content}
+            
+            For each question:
+            1. Create a challenging but fair question
+            2. Provide four options (A, B, C, D)
+            3. Indicate the correct answer
+            4. Include a brief explanation of why the answer is correct
+            
+            
+            Format your response as a JSON array of objects with the following structure:
+            [
+              {{
+                "question": "The question text",
+                "option1": "Option A",
+                "option2": "Option B",
+                "option3": "Option C",
+                "option4": "Option D",
+                "correct_option": "The letter of the correct option (A, B, C, or D)",
+                "explanation": "Explanation of the correct answer",
+                "question_type": "MCQ"
+              }},
+              // more questions...
+            ]
+            
+            Make sure the questions test understanding of key concepts from the text, not just trivial details.
             """
         
         prompt = PromptTemplate.from_template(prompt_template)
@@ -738,7 +1259,19 @@ class AssessmentService:
         
         try:
             # Parse the generated questions
-            questions = json.loads(questions_json)
+            questions = json.loads(questions_json.replace("```json", "").replace("```", ""))
+            
+            # Ensure all questions have the correct question_type
+            for q in questions:
+                if "question_type" not in q:
+                    q["question_type"] = question_type
+                    
+                # Handle specific question type validation
+                if question_type == "TRUEFALSE" and "correct_answer" in q:
+                    # Ensure the correct_answer is lowercase (true or false)
+                    if isinstance(q["correct_answer"], str):
+                        q["correct_answer"] = q["correct_answer"].lower()
+                
             return questions
         except json.JSONDecodeError:
             # If JSON parsing fails, try to extract JSON using basic pattern matching
@@ -749,9 +1282,105 @@ class AssessmentService:
                 if start_idx >= 0 and end_idx > start_idx:
                     extracted_json = questions_json[start_idx:end_idx]
                     questions = json.loads(extracted_json)
+                    
+                    # Ensure all questions have the correct question_type
+                    for q in questions:
+                        if "question_type" not in q:
+                            q["question_type"] = question_type
+                            
+                        # Handle specific question type validation
+                        if question_type == "TRUEFALSE" and "correct_answer" in q:
+                            # Ensure the correct_answer is lowercase (true or false)
+                            if isinstance(q["correct_answer"], str):
+                                q["correct_answer"] = q["correct_answer"].lower()
+                                
                     return questions
             except:
                 pass
             
             # Return empty list if all parsing attempts fail
-            return [] 
+            return []
+    
+    def _add_images_to_questions(self, questions: List[Dict], pdf_id: str, student_id: str) -> List[Dict]:
+        """Add relevant images to assessment questions using RAG on image captions.
+        
+        Args:
+            questions: List of generated questions
+            pdf_id: ID of the PDF document
+            student_id: ID of the student
+            
+        Returns:
+            List of questions with image URLs added
+        """
+        try:
+            # Format student ID for database connection
+            safe_student_id = student_id.replace('-', '_')
+            
+            # Create connection string for student's database
+            base_connection = settings.POSTGRES_CONNECTION_STRING
+            if "://" in base_connection and "@" in base_connection:
+                prefix = base_connection[:base_connection.rindex('@') + 1]
+                suffix = base_connection[base_connection.rindex('@') + 1:]
+                
+                if '/' in suffix:
+                    host_port = suffix[:suffix.index('/')]
+                    connection_string = f"{prefix}{host_port}/student_{safe_student_id}"
+                else:
+                    connection_string = f"{base_connection}/student_{safe_student_id}"
+            else:
+                connection_string = base_connection
+            
+            # Initialize embeddings and vector store
+            embeddings = OpenAIEmbeddings(openai_api_key=settings.OPENAI_API_KEY)
+            '''embeddings = GoogleGenerativeAIEmbeddings(google_api_key=settings.GOOGLE_API_KEY,model="models/gemini-embedding-exp-03-07")'''
+            collection_name = f"pdf_{pdf_id}_images"
+            
+            # Connect to PGVector with image captions collection
+            try:
+                vector_store = PGVector(
+                    embeddings=embeddings,
+                    collection_name=collection_name,
+                    connection=connection_string,
+                    use_jsonb=True
+                )
+                
+                # Process each question to find a relevant image
+                for question in questions:
+                    # Extract question text to use for RAG
+                    question_text = question.get("question", "")
+                    
+                    # If MCQ, also consider the options in the query
+                    if question.get("question_type") == "MCQ" and "options" in question:
+                        options_text = " ".join(question["options"])
+                        query_text = f"{question_text} {options_text}"
+                    else:
+                        query_text = question_text
+                    
+                    # Perform similarity search to find relevant image
+                    try:
+                        print(f"Searching for images for question: {question_text}")
+                        print(f"Query text: {query_text}")
+                        results = vector_store.similarity_search_with_score(
+                            query_text, 
+                            k=1  # Get the most relevant image
+                        )
+                        
+                        if results and len(results) > 0:
+                            # Extract image URL from the metadata
+                            doc, score = results[0]
+                            if doc.metadata and "image_url" in doc.metadata:
+                                # Add image URL and caption to question
+                                question["image_url"] = doc.metadata["image_url"]
+                                question["image_caption"] = doc.page_content
+                                question["has_image"] = True
+                            
+                    except Exception as e:
+                        print(f"Error searching for images for question: {str(e)}")
+                        
+            except Exception as e:
+                print(f"Error connecting to image vectors: {str(e)}")
+                        
+        except Exception as e:
+            print(f"Error adding images to questions: {str(e)}")
+            
+        return questions 

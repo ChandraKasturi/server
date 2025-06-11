@@ -36,6 +36,9 @@ class Settings(BaseSettings):
 
     # Google AI
     GOOGLE_API_KEY: str
+    
+    # Gemini API (reusing Google API key by default)
+    _GEMINI_API_KEY: str = ""
 
     # Supabase
     SUPABASE_URL: str
@@ -114,6 +117,15 @@ class Settings(BaseSettings):
     def register_template_path(self) -> str:
         """Gets the full path to the registration email template."""
         return os.path.join(self.EMAIL_TEMPLATE_DIR, self.EMAIL_TEMPLATE_REGISTER)
+
+    @property
+    def GEMINI_API_KEY(self) -> str:
+        """Gets the Gemini API key, defaulting to GOOGLE_API_KEY if not set."""
+        return self._GEMINI_API_KEY or self.GOOGLE_API_KEY
+    
+    @GEMINI_API_KEY.setter
+    def GEMINI_API_KEY(self, value: str):
+        self._GEMINI_API_KEY = value
 
 
 # Create a single, importable settings instance

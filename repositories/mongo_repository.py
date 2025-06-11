@@ -1,5 +1,5 @@
 import pymongo
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Union
 from bson.objectid import ObjectId
 
@@ -216,16 +216,80 @@ class FeedbackRepository(MongoRepository):
 class HistoryRepository(MongoRepository):
     """Repository for user history and assessment operations."""
     
-    def get_history(self, student_id: str, from_date: datetime = None) -> List[Dict]:
-        """Get user history from a specific date."""
+    def get_history(self, student_id: str, from_date: datetime = None, page: int = 1, page_size: int = 10, oldest_first: bool = False, subject: str = None) -> List[Dict]:
+        """Get user history from a specific date with pagination and optional subject filtering.
+        
+        Args:
+            student_id: ID of the student
+            from_date: Optional datetime to filter history created after this date
+            page: Page number (1-based indexing)
+            page_size: Number of items per page (default: 10)
+            oldest_first: If True, return oldest messages first; if False, return newest first (default: False)
+            subject: Optional subject to filter by (e.g., 'science', 'mathematics', etc.)
+            
+        Returns:
+            List of history items for the specified page
+        """
         collection = self.get_collection(student_id, "sahasra_history")
-        query = {"time": {"$gte": from_date}} if from_date else {}
-        return list(collection.find(query))
+        
+        # Build query
+        query = {}
+        
+        # Add date filter if provided
+        if from_date:
+            start_date = from_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date = (from_date + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            query["time"] = {"$gte": start_date, "$lt": end_date}
+        
+        # Add subject filter if provided
+        if subject and subject.lower() != "all":
+            # Normalize subject name (replace hyphens with underscores)
+            normalized_subject = subject.replace("-", "_").lower()
+            query["subject"] = {"$regex": f"^{normalized_subject}$", "$options": "i"}  # Case-insensitive exact match
+        
+        # Calculate skip value for pagination (page is 1-based)
+        skip = (page - 1) * page_size
+        
+        # Sort direction: 1 for ascending (oldest first), -1 for descending (newest first)
+        sort_direction = 1 if oldest_first else -1
+        
+        # Get paginated results sorted by time
+        return list(collection.find(query)
+                   .sort("time", sort_direction)
+                   .skip(skip)
+                   .limit(page_size))
     
-    def get_assessments(self, student_id: str, from_date: datetime = None) -> List[Dict]:
-        """Get user assessments from a specific date."""
+    def get_assessments(self, student_id: str, from_date: datetime = None, subject: str = None, topic: str = None) -> List[Dict]:
+        """Get user assessments from a specific date and optionally filtered by subject or topic.
+        
+        Args:
+            student_id: ID of the student
+            from_date: Optional datetime to filter assessments created after this date
+            subject: Optional subject to filter assessments by subject field
+            topic: Optional topic to filter assessments that include this topic
+            
+        Returns:
+            List of assessments matching the criteria
+        """
         collection = self.get_collection(student_id, "sahasra_assessments")
-        query = {"created_at": {"$gte": from_date}} if from_date else {}
+        query = {}
+        
+        # Add date filter if provided
+        if from_date:
+            query["created_at"] = {"$gte": from_date}
+            
+        # Add subject filter if provided
+        if subject:
+            query["subject"] = subject
+            
+        # Add topic filter if provided
+        if topic:
+            # Search both in 'topic' (legacy) field and 'topics' array
+            query["$or"] = [
+                {"topic": topic},  # Legacy field
+                {"topics": topic}   # New array field
+            ]
+            
         return list(collection.find(query))
     
     def get_assessment_by_id(self, student_id: str, assessment_id: str) -> Optional[Dict]:

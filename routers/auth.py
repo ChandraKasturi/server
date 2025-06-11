@@ -127,7 +127,7 @@ def confirm_register(body: confirmRegisterUmodel, response: Response):
     
     if student_id:
         # Login the user automatically after successful registration
-        _, token = auth_service.login(body.mobilenumberoremail, body.password)
+        _, token = auth_service.login(body.email, body.password)
         
         if token:
             return JSONResponse(
