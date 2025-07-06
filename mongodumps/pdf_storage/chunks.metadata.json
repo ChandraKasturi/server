@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"pdf_id":{"$numberInt":"1"}},"name":"pdf_id_1"},{"v":{"$numberInt":"2"},"key":{"page_number":{"$numberInt":"1"}},"name":"page_number_1"}],"uuid":"68b9041d6f5544168aff230ecffac60e","collectionName":"chunks","type":"collection"}

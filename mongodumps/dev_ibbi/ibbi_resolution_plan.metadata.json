@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"91d0d43982ab4c57bc8262df9cc3db3f","collectionName":"ibbi_resolution_plan","type":"collection"}
