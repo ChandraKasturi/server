@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"a399368d97c94b9896e075664be9e957","collectionName":"ml_doc_genie_data","type":"collection"}
