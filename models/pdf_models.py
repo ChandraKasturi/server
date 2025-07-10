@@ -17,7 +17,10 @@ class QuestionType(str, Enum):
     """Enum for question types."""
     MCQ = "mcq"
     FILL_BLANKS = "fill_in_blanks"
-    DESCRIPTIVE = "descriptive"
+    VERY_SHORT_ANSWER = "very_short_answer"  # 1-2 words, definitions, terms
+    SHORT_ANSWER = "short_answer"            # 1-3 sentences, brief explanations
+    LONG_ANSWER = "long_answer"              # Detailed explanations, multiple paragraphs
+    CASE_STUDY = "case_study"                # Scenario-based analysis questions
     TRUEFALSE = "truefalse"
 
 

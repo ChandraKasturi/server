@@ -280,7 +280,13 @@ class HistoryRepository(MongoRepository):
             
         # Add subject filter if provided
         if subject:
-            query["subject"] = subject
+            if subject.lower() == "all":
+                # When subject is "all", only return assessments that have a subject field
+                # This excludes PDF-related assessments that don't have a subject field
+                query["subject"] = {"$exists": True}
+            else:
+                # Filter by specific subject
+                query["subject"] = subject
             
         # Add topic filter if provided
         if topic:
@@ -289,7 +295,7 @@ class HistoryRepository(MongoRepository):
                 {"topic": topic},  # Legacy field
                 {"topics": topic}   # New array field
             ]
-            
+        print(f"Query: {query}")
         return list(collection.find(query))
     
     def get_assessment_by_id(self, student_id: str, assessment_id: str) -> Optional[Dict]:
