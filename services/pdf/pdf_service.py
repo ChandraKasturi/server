@@ -1191,10 +1191,15 @@ class PDFQuestionGenerationService:
         return f"""
 Analyze the provided PDF document and EXTRACT questions from its content.
 For EACH question identified in the document, generate a JSON object.
-Determine the question_type (e.g., "multiple_choice", "DESCRIPTIVE").
+Determine the question_type from: "multiple_choice", "VERY_SHORT_ANSWER", "SHORT_ANSWER", "LONG_ANSWER", "CASE_STUDY".
 The output should be a JSON array containing these objects.
 Write questions and options in LaTeX if needed. Do NOT include an "_id" field in your response.
-IMPORTANT: Make sure to extract all the questions from the document and classify them as either multiple choice or descriptive.
+IMPORTANT: Make sure to extract all the questions from the document and classify them appropriately:
+- multiple_choice: Has distinct options (A, B, C, D)
+- VERY_SHORT_ANSWER: Requires 1-3 words (definitions, terms)
+- SHORT_ANSWER: Requires 1-3 sentences (brief explanations)
+- LONG_ANSWER: Requires detailed explanations (multiple paragraphs)
+- CASE_STUDY: Scenario-based application questions
 
 **General Instructions for ALL questions:**
 - "questionset" MUST be "scanned".
@@ -1229,21 +1234,78 @@ If the question is primarily multiple-choice (has distinct options), use this fo
   "ignore":True
 }}
 
-If the question is descriptive (requires a written answer, not multiple choice), use this format:
+If the question requires a VERY SHORT ANSWER (1-3 words), use this format:
 {{
   "question": "Extract the main question text from the document for this specific question (in LaTeX if needed)",
-  "model_answer": "Provide a comprehensive and accurate model answer to the question, detailing the steps or key points expected for a full-credit response. This field MUST be filled. Anwer this in Detail",
-  "grading_criteria": "Provide a detailed breakdown of how the answer should be graded. For example: 'Concept explanation: X marks; Correct formula application: Y marks; Final correct answer: Z marks; Clear steps shown: W marks'. This field MUST be filled.",
-  "explaination": "Provide a detailed explanation of the underlying concepts, principles, or methods required to answer the question. This can include common pitfalls or alternative approaches if relevant. This field MUST be filled and cannot be empty.",
+  "model_answer": "Expected very short answer (1-3 words or brief phrase)",
+  "grading_criteria": "Full marks for exact/equivalent term, partial marks for close answers, zero for incorrect",
+  "explaination": "Brief explanation about the expected answer and key concept",
   "question_image": "",
   "explaination_image": "",
-  "question_type": "DESCRIPTIVE",
+  "question_type": "VERY_SHORT_ANSWER",
   "subject": "{subject}",
   "topic": "{topic}",
   "subtopic": "{subtopic}",
   "level": "Determine the difficulty level for this question [1-3] 1 Easy , 2 Medium, 3 Hard",
   "questionset": "scanned",
-  "marks": "Extract the marks allocated for this question, if visible. If not, suggest a default (e.g., 3-5).",
+  "marks": "Extract the marks allocated for this question, if visible. If not, suggest default like 1.",
+  "created_at": "{current_timestamp}",
+  "ignore":True
+}}
+
+If the question requires a SHORT ANSWER (1-3 sentences), use this format:
+{{
+  "question": "Extract the main question text from the document for this specific question (in LaTeX if needed)",
+  "model_answer": "Brief but complete answer (1-3 sentences covering key points)",
+  "grading_criteria": "Key points breakdown: main concept (X marks), supporting detail (Y marks), clarity (Z marks)",
+  "explaination": "Brief explanation about the question and key concepts tested",
+  "question_image": "",
+  "explaination_image": "",
+  "question_type": "SHORT_ANSWER",
+  "subject": "{subject}",
+  "topic": "{topic}",
+  "subtopic": "{subtopic}",
+  "level": "Determine the difficulty level for this question [1-3] 1 Easy , 2 Medium, 3 Hard",
+  "questionset": "scanned",
+  "marks": "Extract the marks allocated for this question, if visible. If not, suggest default like 3.",
+  "created_at": "{current_timestamp}",
+  "ignore":True
+}}
+
+If the question requires a LONG ANSWER (detailed explanation), use this format:
+{{
+  "question": "Extract the main question text from the document for this specific question (in LaTeX if needed)",
+  "model_answer": "Comprehensive detailed answer with multiple key points and examples",
+  "grading_criteria": "Detailed breakdown: concept understanding (X marks), examples/evidence (Y marks), analysis/evaluation (Z marks), structure/clarity (W marks)",
+  "explaination": "Explanation of the depth and scope expected in the answer",
+  "question_image": "",
+  "explaination_image": "",
+  "question_type": "LONG_ANSWER",
+  "subject": "{subject}",
+  "topic": "{topic}",
+  "subtopic": "{subtopic}",
+  "level": "Determine the difficulty level for this question [1-3] 1 Easy , 2 Medium, 3 Hard",
+  "questionset": "scanned",
+  "marks": "Extract the marks allocated for this question, if visible. If not, suggest default like 5.",
+  "created_at": "{current_timestamp}",
+  "ignore":True
+}}
+
+If the question is a CASE STUDY (scenario-based application), use this format:
+{{
+  "question": "Extract the scenario and question text from the document (in LaTeX if needed)",
+  "model_answer": "Comprehensive case analysis with problem identification, theoretical application, and practical solutions",
+  "grading_criteria": "Case analysis (X marks), theoretical application (Y marks), practical solutions (Z marks), justification (W marks)",
+  "explaination": "Overview of the case scenario and key learning objectives",
+  "question_image": "",
+  "explaination_image": "",
+  "question_type": "CASE_STUDY",
+  "subject": "{subject}",
+  "topic": "{topic}",
+  "subtopic": "{subtopic}",
+  "level": "Determine the difficulty level for this question [1-3] 1 Easy , 2 Medium, 3 Hard",
+  "questionset": "scanned",
+  "marks": "Extract the marks allocated for this question, if visible. If not, suggest default like 10.",
   "created_at": "{current_timestamp}",
   "ignore":True
 }}
@@ -1256,7 +1318,7 @@ IMPORTANT: Make sure the FINAL JSON STRUCTURE is PARSABLE with json.loads()
 IMPORTANT: Make sure the final JSON has only utf-8 encoded characters.
 IMPORTANT: Make sure to Escape all backslashes and other charecters which could cause errors in JSON parsing.
 IMPORTANT: FOR MCQ Do not include the options in the question keep them in the options field.
-IMPORTANT: FOR DESCRIPTIVE model answer and explaination MUST NOT BE EMPTY.
+IMPORTANT: FOR all text-based questions (VERY_SHORT_ANSWER, SHORT_ANSWER, LONG_ANSWER, CASE_STUDY) model_answer and grading_criteria MUST NOT BE EMPTY.
 """
     
     async def _clean_json_with_gemini(self, raw_json_text: str) -> str:
@@ -1377,11 +1439,14 @@ Return only the cleaned JSON array:
                     
                     question_type = str(item_json.get("question_type", "")).upper()
                     
-                    if question_type == "DESCRIPTIVE":
-                        item_json["question_type"] = "DESCRIPTIVE"
-                        item_json["model_answer"] = ""  # Enforce empty
+                    # Handle text-based answer types
+                    if question_type in ["VERY_SHORT_ANSWER", "SHORT_ANSWER", "LONG_ANSWER", "CASE_STUDY"]:
+                        # Ensure these are treated as text-based questions
+                        item_json["question_type"] = question_type
                         
-                        # Ensure grading_criteria exists
+                        # Ensure required fields exist for text-based questions
+                        if "model_answer" not in item_json:
+                            item_json["model_answer"] = ""
                         if "grading_criteria" not in item_json:
                             item_json["grading_criteria"] = ""
                         
@@ -1389,19 +1454,33 @@ Return only the cleaned JSON array:
                         mcq_keys = ["option1", "option2", "option3", "option4", "correctanswer"]
                         for key in mcq_keys:
                             item_json.pop(key, None)
+                            
+                        # Set appropriate marks based on question type
+                        if question_type == "VERY_SHORT_ANSWER" and item_json.get("marks", "") == "":
+                            item_json["marks"] = "1"
+                        elif question_type == "SHORT_ANSWER" and item_json.get("marks", "") == "":
+                            item_json["marks"] = "3"
+                        elif question_type == "LONG_ANSWER" and item_json.get("marks", "") == "":
+                            item_json["marks"] = "5"
+                        elif question_type == "CASE_STUDY" and item_json.get("marks", "") == "":
+                            item_json["marks"] = "10"
+                            
                     else:
-                        # Assume multiple_choice if not explicitly DESCRIPTIVE
+                        # Handle MCQ questions
                         if question_type not in ["MULTIPLE_CHOICE", "SINGLE_SELECT_MCQ"]:
                             if any(opt_key in item_json for opt_key in ["option1", "option2", "option3", "option4"]):
                                 item_json["question_type"] = "multiple_choice"
                             else:
-                                item_json["question_type"] = "unknown"
+                                # Default to multiple choice if type is unclear
+                                item_json["question_type"] = "multiple_choice"
                         
-                        item_json["correctanswer"] = ""  # Enforce empty for MCQ types
+                        # For MCQ questions, ensure correctanswer field exists
+                        if "correctanswer" not in item_json:
+                            item_json["correctanswer"] = ""
                         
-                        # Remove descriptive specific fields if present
-                        descriptive_keys = ["model_answer", "grading_criteria"]
-                        for key in descriptive_keys:
+                        # Remove text-based question specific fields if present
+                        text_based_keys = ["model_answer", "grading_criteria"]
+                        for key in text_based_keys:
                             item_json.pop(key, None)
                     
                     processed_questions.append(item_json)
