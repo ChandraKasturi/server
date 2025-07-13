@@ -8,6 +8,11 @@ from datetime import datetime
 
 from config import settings
 from models.pdf_models import PDFDocument, PDFUploadRequest, PDFLearnRequest
+from models.u_models import (
+    PDFUploadResponse, PDFListResponse, PDFGetResponse, PDFDeleteResponse,
+    PDFProcessingStatusResponse, PDFProcessingStartResponse, PDFLearnResponse,
+    PDFQuestionGenerationResponse
+)
 from services.pdf.pdf_service import PDFUploadService, PDFProcessingService, PDFQuestionGenerationService
 from services.langchain.langchain_service import LangchainService
 from routers.auth import auth_middleware
@@ -36,7 +41,7 @@ class UGJSONResponse(JSONResponse):
         super().__init__(content=content, status_code=status_code)
 
 
-@router.post("/upload")
+@router.post("/upload", response_model=PDFUploadResponse)
 async def upload_pdf(
     request: Request,
     file: UploadFile = File(...),
@@ -117,7 +122,7 @@ async def upload_pdf(
         )
 
 
-@router.get("/list")
+@router.get("/list", response_model=PDFListResponse)
 async def list_pdfs(
     request: Request,
     subject: Optional[str] = None,
@@ -149,7 +154,7 @@ async def list_pdfs(
         )
 
 
-@router.get("/{pdf_id}")
+@router.get("/{pdf_id}", response_model=PDFGetResponse)
 async def get_pdf(
     pdf_id: str,
     request: Request,
@@ -204,7 +209,7 @@ async def get_pdf(
         )
 
 
-@router.delete("/{pdf_id}")
+@router.delete("/{pdf_id}", response_model=PDFDeleteResponse)
 async def delete_pdf(
     pdf_id: str,
     request: Request,
@@ -254,7 +259,7 @@ async def delete_pdf(
         )
 
 
-@router.post("/{pdf_id}/process")
+@router.post("/{pdf_id}/process", response_model=PDFProcessingStartResponse)
 async def process_pdf(
     pdf_id: str,
     request: Request,
@@ -313,7 +318,7 @@ async def process_pdf(
         )
 
 
-@router.get("/{pdf_id}/status")
+@router.get("/{pdf_id}/status", response_model=PDFProcessingStatusResponse)
 async def check_processing_status(
     pdf_id: str,
     request: Request,
@@ -389,7 +394,7 @@ async def check_processing_status(
         )
 
 
-@router.post("/{pdf_id}/learn")
+@router.post("/{pdf_id}/learn", response_model=PDFLearnResponse)
 async def learn_from_pdf(
     pdf_id: str,
     request_body: PDFLearnRequest,
@@ -471,7 +476,7 @@ async def learn_from_pdf(
         )
 
 
-@router.post("/generate-questions")
+@router.post("/generate-questions", response_model=PDFQuestionGenerationResponse)
 async def generate_questions_from_pdf(
     file: UploadFile = File(...),
     subject: str = Form(...),

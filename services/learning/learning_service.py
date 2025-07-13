@@ -150,7 +150,7 @@ class LearningService:
             # Filter PDFs by subject if specified
             subject_pdfs = []
             for pdf in completed_pdfs:
-                pdf_subject = pdf.metadata.get("subject", "").lower() if pdf.metadata else ""
+                pdf_subject = (pdf.metadata.subject or "").lower() if pdf.metadata else ""
                 
                 # Match PDFs with this subject or with no subject specified
                 if subject.lower() in pdf_subject or not pdf_subject:

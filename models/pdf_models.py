@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Any, Union
+from typing import List, Optional, Union
 from enum import Enum
 from datetime import datetime
 import uuid
@@ -39,6 +39,16 @@ class PDFUploadRequest(BaseModel):
     grade: Optional[str] = None
 
 
+class PDFDocumentMetadata(BaseModel):
+    """Metadata for PDF documents - matches MongoDB structure"""
+    subject: Optional[str] = None
+    grade: Optional[str] = None
+    author: Optional[str] = None
+    tags: Optional[List[str]] = None
+    language: Optional[str] = None
+    category: Optional[str] = None
+
+
 class PDFDocument(BaseModel):
     """Model for PDF document metadata."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -54,10 +64,20 @@ class PDFDocument(BaseModel):
     processing_error: Optional[str] = None
     process_start_time: Optional[datetime] = None
     process_end_time: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: PDFDocumentMetadata = Field(default_factory=PDFDocumentMetadata)
     
     class Config:
         use_enum_values = True
+
+
+class PDFChunkMetadata(BaseModel):
+    """Metadata for PDF chunks"""
+    section_title: Optional[str] = None
+    confidence_score: Optional[float] = None
+    processing_method: Optional[str] = None
+    text_quality: Optional[str] = None
+    has_images: Optional[bool] = None
+    image_count: Optional[int] = None
 
 
 class PDFChunk(BaseModel):
@@ -68,8 +88,18 @@ class PDFChunk(BaseModel):
     page_number: Optional[int] = None
     content: str
     embedding: Optional[List[float]] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: PDFChunkMetadata = Field(default_factory=PDFChunkMetadata)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PDFTextMetadata(BaseModel):
+    """Metadata for PDF text storage"""
+    extraction_method: Optional[str] = None
+    processing_time: Optional[float] = None
+    language_detected: Optional[str] = None
+    text_quality_score: Optional[float] = None
+    has_tables: Optional[bool] = None
+    has_images: Optional[bool] = None
 
 
 class PDFText(BaseModel):
@@ -81,7 +111,7 @@ class PDFText(BaseModel):
     page_count: int
     word_count: Optional[int] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: PDFTextMetadata = Field(default_factory=PDFTextMetadata)
 
 
 class PDFTextChunk(BaseModel):
@@ -95,6 +125,16 @@ class PDFTextChunk(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class GeneratedQuestionMetadata(BaseModel):
+    """Metadata for generated questions"""
+    generation_method: Optional[str] = None
+    confidence_score: Optional[float] = None
+    source_text_snippet: Optional[str] = None
+    keywords: Optional[List[str]] = None
+    bloom_taxonomy_level: Optional[str] = None
+    estimated_time_minutes: Optional[int] = None
+
+
 class GeneratedQuestion(BaseModel):
     """Model for generated questions."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -106,7 +146,7 @@ class GeneratedQuestion(BaseModel):
     page_reference: Optional[int] = None
     embedding: Optional[List[float]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: GeneratedQuestionMetadata = Field(default_factory=GeneratedQuestionMetadata)
     
     class Config:
         use_enum_values = True
@@ -162,6 +202,16 @@ class AssessmentStatus(str, Enum):
     COMPLETED = "completed"
 
 
+class AssessmentMetadata(BaseModel):
+    """Metadata for assessments"""
+    difficulty_distribution: Optional[str] = None
+    estimated_duration_minutes: Optional[int] = None
+    question_categories: Optional[List[str]] = None
+    auto_generated: Optional[bool] = None
+    generation_timestamp: Optional[datetime] = None
+    instructor_notes: Optional[str] = None
+
+
 class Assessment(BaseModel):
     """Model for assessments."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -176,7 +226,7 @@ class Assessment(BaseModel):
     time_limit: Optional[int] = None  # in minutes
     passing_score: Optional[float] = None  # percentage
     is_randomized: bool = False
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: AssessmentMetadata = Field(default_factory=AssessmentMetadata)
     
     class Config:
         use_enum_values = True

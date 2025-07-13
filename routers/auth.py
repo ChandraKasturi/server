@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Request, Response, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from models.u_models import loginUmodel, ForgotPasswordUmodel, UpdatePasswordUmodel, registerUmodel, confirmRegisterUmodel
+from models.u_models import (
+    loginUmodel, ForgotPasswordUmodel, UpdatePasswordUmodel, 
+    registerUmodel, confirmRegisterUmodel, AuthMessageResponse
+)
 from services.auth.auth_service import AuthService
 
 router = APIRouter(tags=["Authentication"])
@@ -32,7 +35,7 @@ def auth_middleware(request: Request):
     
     return student_id 
 
-@router.post("/login", response_class=JSONResponse)
+@router.post("/login", response_model=AuthMessageResponse)
 def login(body: loginUmodel, request: Request, response: Response):
     """Login endpoint for user authentication.
     
@@ -58,7 +61,7 @@ def login(body: loginUmodel, request: Request, response: Response):
     else:
         return JSONResponse(content={"Message": "Incorrect Username Or Password"}, status_code=400)
 
-@router.post("/forgotpassword", response_class=JSONResponse)
+@router.post("/forgotpassword", response_model=AuthMessageResponse)
 def forgot_password(body: ForgotPasswordUmodel):
     """Forgot password endpoint to initiate password reset.
     
@@ -75,7 +78,7 @@ def forgot_password(body: ForgotPasswordUmodel):
     
     return JSONResponse(content={"Message": message}, status_code=status_code)
 
-@router.post("/updatepassword", response_class=JSONResponse)
+@router.post("/updatepassword", response_model=AuthMessageResponse)
 def reset_password(body: UpdatePasswordUmodel):
     """Update password endpoint for password reset.
     
@@ -98,7 +101,7 @@ def reset_password(body: UpdatePasswordUmodel):
     
     return JSONResponse(content={"Message": message}, status_code=status_code)
 
-@router.post("/getotp", response_class=JSONResponse)
+@router.post("/getotp", response_model=AuthMessageResponse)
 def register_request(body: registerUmodel):
     """Registration request endpoint to get OTP.
     
@@ -112,7 +115,7 @@ def register_request(body: registerUmodel):
     
     return JSONResponse(content={"Message": message}, status_code=status_code)
 
-@router.post("/register", response_class=JSONResponse)
+@router.post("/register", response_model=AuthMessageResponse)
 def confirm_register(body: confirmRegisterUmodel, response: Response):
     """Complete registration endpoint with OTP verification.
     
@@ -138,7 +141,7 @@ def confirm_register(body: confirmRegisterUmodel, response: Response):
     
     return JSONResponse(content={"Message": "Unable To Register User"}, status_code=400)
 
-@router.get("/logout", response_class=JSONResponse)
+@router.get("/logout", response_model=AuthMessageResponse)
 def logout(student_id: str = Depends(auth_middleware)):
     """Logout endpoint to invalidate user session.
     
