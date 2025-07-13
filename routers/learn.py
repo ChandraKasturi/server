@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from typing import Optional
 
 from models.pdf_models import SubjectLearnRequest, TTSRequest
+from models.u_models import LearnAnswerResponse, TTSVoicesResponse
 from services.learning.learning_service import LearningService
 from services.learning.tts_service import TTSService
 from routers.auth import auth_middleware
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/api/learn", tags=["Learning"])
 learning_service = LearningService()
 tts_service = TTSService()
 
-@router.post("/science")
+@router.post("/science", response_model=LearnAnswerResponse)
 async def learn_science(
     request_body: SubjectLearnRequest,
     request: Request,
@@ -63,7 +64,7 @@ async def learn_science(
             status_code=500
         )
 
-@router.post("/social-science")
+@router.post("/social-science", response_model=LearnAnswerResponse)
 async def learn_social_science(
     request_body: SubjectLearnRequest,
     request: Request,
@@ -96,24 +97,24 @@ async def learn_social_science(
         
         if status_code != 200:
             return UGJSONResponse(
-                data={},
+                content={},
                 message=answer,
                 status_code=status_code
             )
             
         return UGJSONResponse(
-            data={"answer": answer},
+            content={"answer": answer},
             message="Social Science answer generated successfully"
         )
         
     except Exception as e:
         return UGJSONResponse(
-            data={},
+            content={},
             message=f"Error learning social science: {str(e)}",
             status_code=500
         )
 
-@router.post("/mathematics")
+@router.post("/mathematics", response_model=LearnAnswerResponse)
 async def learn_mathematics(
     request_body: SubjectLearnRequest,
     request: Request,
@@ -146,24 +147,24 @@ async def learn_mathematics(
         
         if status_code != 200:
             return UGJSONResponse(
-                data={},
+                content={},
                 message=answer,
                 status_code=status_code
             )
             
         return UGJSONResponse(
-            data={"answer": answer},
+            content={"answer": answer},
             message="Mathematics answer generated successfully"
         )
         
     except Exception as e:
         return UGJSONResponse(
-            data={},
+            content={},
             message=f"Error learning mathematics: {str(e)}",
             status_code=500
         )
 
-@router.post("/english")
+@router.post("/english", response_model=LearnAnswerResponse)
 async def learn_english(
     request_body: SubjectLearnRequest,
     request: Request,
@@ -196,7 +197,7 @@ async def learn_english(
         
         if status_code != 200:
             return UGJSONResponse(
-                content={},
+                content={"answer": answer},
                 status_code=status_code
             )
             
@@ -211,7 +212,7 @@ async def learn_english(
             status_code=500
         )
 
-@router.post("/hindi")
+@router.post("/hindi", response_model=LearnAnswerResponse)
 async def learn_hindi(
     request_body: SubjectLearnRequest,
     request: Request,
@@ -244,25 +245,25 @@ async def learn_hindi(
         
         if status_code != 200:
             return UGJSONResponse(
-                data={},
+                content={},
                 message=answer,
                 status_code=status_code
             )
             
         return UGJSONResponse(
-            data={"answer": answer},
+            content={"answer": answer},
             message="Hindi answer generated successfully"
         )
         
     except Exception as e:
         return UGJSONResponse(
-            data={},
+            content={},
             message=f"Error learning Hindi: {str(e)}",
             status_code=500
         )
 
 # Generic endpoint for any subject
-@router.post("/{subject}")
+@router.post("/{subject}", response_model=LearnAnswerResponse)
 async def learn_subject(
     subject: str,
     request_body: SubjectLearnRequest,
@@ -301,19 +302,19 @@ async def learn_subject(
         
         if status_code != 200:
             return UGJSONResponse(
-                data={},
+                content={"answer": answer},
                 message=answer,
                 status_code=status_code
             )
             
         return UGJSONResponse(
-            data={"answer": answer},
+            content={"answer": answer},
             message=f"{subject.capitalize()} answer generated successfully"
         )
         
     except Exception as e:
         return UGJSONResponse(
-            data={},
+            content={},
             message=f"Error learning {subject}: {str(e)}",
             status_code=500
         )
@@ -346,7 +347,7 @@ async def stream_tts_audio(
         # Validate text
         if not text or not text.strip():
             return UGJSONResponse(
-                data={},
+                content={},
                 message="Text is required for TTS conversion",
                 status_code=400
             )
@@ -375,13 +376,13 @@ async def stream_tts_audio(
         
     except Exception as e:
         return UGJSONResponse(
-            data={},
+            content={},
             message=f"Error streaming TTS audio: {str(e)}",
             status_code=500
         )
 
 
-@router.get("/tts/voices")
+@router.get("/tts/voices", response_model=TTSVoicesResponse)
 async def get_available_voices(
     request: Request,
     x_auth_session: Optional[str] = Header(None),
@@ -401,13 +402,13 @@ async def get_available_voices(
         voices = tts_service.get_available_voices()
         
         return UGJSONResponse(
-            data={"voices": voices},
+            content={"voices": voices},
             message="Available voices retrieved successfully"
         )
         
     except Exception as e:
         return UGJSONResponse(
-            data={},
+            content={},
             message=f"Error retrieving voices: {str(e)}",
             status_code=500
         ) 

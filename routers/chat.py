@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from models.u_models import uTweet, uAnswer, uploadVectorUmodel
+from models.u_models import (
+    uTweet, uAnswer, uploadVectorUmodel, TranslateRequest,
+    TweetResponse, AnswerResponse, TranslateResponse, UploadVectorResponse
+)
 from services.langchain.langchain_service import LangchainService
 from routers.auth import auth_middleware
 
@@ -9,7 +12,7 @@ router = APIRouter(tags=["AI Chat"])
 
 langchain_service = LangchainService()
 
-@router.post("/tweet", response_class=JSONResponse)
+@router.post("/tweet", response_model=TweetResponse)
 def generate_tweet(body: uTweet, request: Request, student_id: str = Depends(auth_middleware)):
     """Generate a tweet about a topic.
     
@@ -28,7 +31,7 @@ def generate_tweet(body: uTweet, request: Request, student_id: str = Depends(aut
     
     return JSONResponse(content={"tweet": tweet}, status_code=status_code)
 
-@router.post("/answer", response_class=JSONResponse)
+@router.post("/answer", response_model=AnswerResponse)
 def get_answer(body: uAnswer, request: Request, student_id: str = Depends(auth_middleware)):
     """Get an answer to a question using AI.
     
@@ -51,8 +54,8 @@ def get_answer(body: uAnswer, request: Request, student_id: str = Depends(auth_m
     
     return JSONResponse(content={"answer": answer}, status_code=status_code)
 
-@router.post("/translate", response_class=JSONResponse)
-def translate_text(body: dict, request: Request, student_id: str = Depends(auth_middleware)):
+@router.post("/translate", response_model=TranslateResponse)
+def translate_text(body: TranslateRequest, request: Request, student_id: str = Depends(auth_middleware)):
     """Translate text to another language.
     
     Args:
@@ -63,8 +66,8 @@ def translate_text(body: dict, request: Request, student_id: str = Depends(auth_
     Returns:
         JSON response with translated text
     """
-    text = body.get("text", "")
-    target_language = body.get("language", "English")
+    text = body.text
+    target_language = body.language
     
     # Get JWT token to use as session ID
     session_id = request.headers.get("X-Auth-Session")
@@ -73,7 +76,7 @@ def translate_text(body: dict, request: Request, student_id: str = Depends(auth_
     
     return JSONResponse(content={"translated": translated}, status_code=status_code)
 
-@router.post("/uploadvector", response_class=JSONResponse)
+@router.post("/uploadvector", response_model=UploadVectorResponse)
 def upload_vector(body: uploadVectorUmodel, request: Request, student_id: str = Depends(auth_middleware)):
     """Upload text to vector storage.
     

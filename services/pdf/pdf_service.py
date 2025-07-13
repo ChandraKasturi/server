@@ -95,6 +95,12 @@ class PDFUploadService:
             file_size = len(contents)
         
         # Create PDF document record
+        from models.pdf_models import PDFDocumentMetadata
+        pdf_metadata = PDFDocumentMetadata(
+            subject=metadata.subject,
+            grade=metadata.grade
+        )
+        
         pdf_document = PDFDocument(
             id=pdf_id,
             user_id=user_id,
@@ -105,10 +111,7 @@ class PDFUploadService:
             description=metadata.description,
             upload_date=datetime.utcnow(),
             processing_status=ProcessingStatus.PENDING,
-            metadata={
-                "subject": metadata.subject,
-                "grade": metadata.grade
-            }
+            metadata=pdf_metadata
         )
         
         # Save to repository
@@ -378,7 +381,7 @@ class PDFProcessingService:
                     title=pdf_document.title,
                     content=full_text,
                     page_count=page_count,
-                    metadata=pdf_document.metadata
+                    metadata=pdf_document.metadata.dict() if pdf_document.metadata else {}
                 )
                 
                 # Store chunks in the user's database (async)
@@ -435,15 +438,16 @@ class PDFProcessingService:
                     # Get current metadata
                     pdf_doc = self.pdf_repository.get_pdf_document(pdf_id)
                     if pdf_doc:
-                        current_metadata = pdf_doc.metadata or {}
-                        # Add image information
-                        current_metadata.update({
+                        from models.pdf_models import PDFDocumentMetadata
+                        # Convert existing metadata to dict and add image information
+                        current_metadata_dict = pdf_doc.metadata.dict() if pdf_doc.metadata else {}
+                        current_metadata_dict.update({
                             "image_count": len(image_data),
                             "has_images": len(image_data) > 0,
                             "images_processed": True
                         })
-                        # Update metadata (async)
-                        await self._update_pdf_document_async(pdf_id, {"metadata": current_metadata})
+                        # Update metadata (async) - pass dict directly to MongoDB
+                        await self._update_pdf_document_async(pdf_id, {"metadata": current_metadata_dict})
                 
                 # Update Redis status
                 await self.redis_client.hset(
@@ -876,6 +880,9 @@ class PDFProcessingService:
         documents = []
         for chunk in chunks:
             # Create document with metadata
+            # Convert Pydantic metadata to dict if it exists
+            chunk_metadata_dict = chunk.metadata.dict() if chunk.metadata else {}
+            
             doc = Document(
                 page_content=chunk.content,
                 metadata={
@@ -883,7 +890,7 @@ class PDFProcessingService:
                     'chunk_id': chunk.id,
                     'page': chunk.page_number,
                     'user_id': user_id,  # Include user_id in metadata
-                    **chunk.metadata
+                    **chunk_metadata_dict
                 }
             )
             documents.append(doc)

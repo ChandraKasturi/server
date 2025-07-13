@@ -1,10 +1,14 @@
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 from models.u_models import (
-    AssessUmodel, FeedBackUmodel, uAnswer, PDFAssessmentRequest, AssessmentRequest
+    AssessUmodel, FeedBackUmodel, uAnswer, PDFAssessmentRequest, AssessmentRequest,
+    AssessmentGenerationResponse, AssessmentSubmissionResponse, AssessmentListResponse,
+    AssessmentByIdResponse, FeedbackResponse, ProgressResponse, SubjectProgress,
+    AssessmentSubmissionsListResponse, AssessmentPDFListResponse, SubjectHistoryResponse,
+    AssessmentHistoryItem, AssessmentSubmissionItem
 )
 from services.assessment.assessment_service import AssessmentService
 from routers.auth import auth_middleware
@@ -17,7 +21,7 @@ assessment_service = AssessmentService()
 feedback_repo = FeedbackRepository()
 history_repository = HistoryRepository()
 
-@router.post("/assessment", response_class=UGJSONResponse)
+@router.post("/assessment", response_model=AssessmentSubmissionResponse)
 def submit_assessment(body: AssessUmodel, request: Request, student_id: str = Depends(auth_middleware)):
     """Submit assessment answers for grading.
     
@@ -37,7 +41,7 @@ def submit_assessment(body: AssessUmodel, request: Request, student_id: str = De
     
     return UGJSONResponse(content=result, status_code=status_code)
 
-@router.post("/api/assessment", response_class=UGJSONResponse)
+@router.post("/api/assessment", response_model=AssessmentGenerationResponse)
 def generate_assessment(body: AssessmentRequest, request: Request, student_id: str = Depends(auth_middleware)):
     """Generate assessment questions based on provided parameters.
     
@@ -66,7 +70,7 @@ def generate_assessment(body: AssessmentRequest, request: Request, student_id: s
     
     return UGJSONResponse(content=result, status_code=status_code)
 
-@router.post("/generate-pdf-assessment", response_class=UGJSONResponse)
+@router.post("/generate-pdf-assessment", response_model=AssessmentGenerationResponse)
 def generate_pdf_assessment(
     body: PDFAssessmentRequest, 
     request: Request, 
@@ -91,7 +95,7 @@ def generate_pdf_assessment(
     
     return UGJSONResponse(content=result, status_code=status_code)
 
-@router.get("/assessments", response_class=UGJSONResponse)
+@router.get("/assessments", response_model=List[AssessmentHistoryItem])
 def get_assessments(request: Request, student_id: str = Depends(auth_middleware), time: str = None, subject: str = None, topic: str = None):
     """Get all assessments for a student.
     
@@ -109,7 +113,7 @@ def get_assessments(request: Request, student_id: str = Depends(auth_middleware)
     
     return UGJSONResponse(content=assessments, status_code=status_code)
 
-@router.get("/history", response_class=UGJSONResponse)
+@router.get("/history", response_model=List[AssessmentHistoryItem])
 def get_history(request: Request, student_id: str = Depends(auth_middleware), time: str = None):
     """Get assessment history for a student.
     
@@ -128,7 +132,7 @@ def get_history(request: Request, student_id: str = Depends(auth_middleware), ti
     
     return UGJSONResponse(content=history, status_code=status_code)
 
-@router.get("/assessment/{assessment_id}", response_class=UGJSONResponse)
+@router.get("/assessment/{assessment_id}", response_model=AssessmentHistoryItem)
 def get_assessment_by_id(assessment_id: str, request: Request, student_id: str = Depends(auth_middleware)):
     """Get a specific assessment by ID.
     
@@ -144,7 +148,7 @@ def get_assessment_by_id(assessment_id: str, request: Request, student_id: str =
     
     return UGJSONResponse(content=assessment, status_code=status_code)
 
-@router.get("/pdf-assessments/{pdf_id}", response_class=UGJSONResponse)
+@router.get("/pdf-assessments/{pdf_id}", response_model=AssessmentPDFListResponse)
 def get_pdf_assessments(
     pdf_id: str, 
     request: Request, 
@@ -181,7 +185,7 @@ def get_pdf_assessments(
         status_code=200
     )
 
-@router.post("/feedback", response_class=UGJSONResponse)
+@router.post("/feedback", response_model=FeedbackResponse)
 def add_feedback(body: FeedBackUmodel, request: Request, student_id: str = Depends(auth_middleware)):
     """Add feedback from a student.
     
@@ -200,7 +204,7 @@ def add_feedback(body: FeedBackUmodel, request: Request, student_id: str = Depen
     else:
         return UGJSONResponse(content={"Message": "Something Went Wrong"}, status_code=400)
 
-@router.get("/progress")
+@router.get("/progress", response_model=ProgressResponse)
 def get_progress():
     """Get progress information (placeholder endpoint).
     
@@ -218,7 +222,7 @@ def get_progress():
         status_code=200
     )
 
-@router.get("/assessment-submissions", response_class=UGJSONResponse)
+@router.get("/assessment-submissions", response_model=AssessmentSubmissionsListResponse)
 def get_assessment_submissions(request: Request, student_id: str = Depends(auth_middleware)):
     """Get all assessment submissions for a student.
     
@@ -253,7 +257,7 @@ def get_assessment_submissions(request: Request, student_id: str = Depends(auth_
         status_code=200
     )
 
-@router.get("/assessment-submission/{assessment_id}", response_class=UGJSONResponse)
+@router.get("/assessment-submission/{assessment_id}", response_model=AssessmentSubmissionItem)
 def get_assessment_submission(
     assessment_id: str, 
     request: Request, 
@@ -293,7 +297,7 @@ def get_assessment_submission(
         status_code=200
     )
 
-@router.get("/get-history/{subject}")
+@router.get("/get-history/{subject}", response_model=SubjectHistoryResponse)
 def get_subject_history(
     subject: str,
     request: Request, 

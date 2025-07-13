@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request, File, UploadFile
 from fastapi.responses import JSONResponse, FileResponse
 
-from models.u_models import ProfileUmodel
+from models.u_models import ProfileUmodel, ProfileGetResponse, ProfileUpdateResponse, ProfileImageUpdateResponse
 from services.profile.profile_service import ProfileService
 from routers.auth import auth_middleware
 from utils.json_response import UGJSONResponse
@@ -10,7 +10,7 @@ router = APIRouter(tags=["Profile"])
 
 profile_service = ProfileService()
 
-@router.get("/profile", response_class=JSONResponse)
+@router.get("/profile", response_model=ProfileGetResponse)
 def get_profile(request: Request, student_id: str = Depends(auth_middleware)):
     """Get user profile information.
     
@@ -25,7 +25,7 @@ def get_profile(request: Request, student_id: str = Depends(auth_middleware)):
     
     return JSONResponse(content=profile_data, status_code=status_code)
 
-@router.post("/profile", response_class=JSONResponse)
+@router.post("/profile", response_model=ProfileUpdateResponse)
 def update_profile(body: ProfileUmodel, student_id: str = Depends(auth_middleware)):
     """Update user profile information.
     
@@ -40,7 +40,7 @@ def update_profile(body: ProfileUmodel, student_id: str = Depends(auth_middlewar
     
     return JSONResponse(content=result, status_code=status_code)
 
-@router.post("/updateprofileimage", response_class=UGJSONResponse)
+@router.post("/updateprofileimage", response_model=ProfileImageUpdateResponse)
 async def update_profile_image(student_id: str = Depends(auth_middleware), file: UploadFile = File(...)):
     """Update user profile image.
     
