@@ -97,20 +97,18 @@ async def learn_social_science(
         
         if status_code != 200:
             return UGJSONResponse(
-                content={},
-                message=answer,
+                content={"answer": answer},
                 status_code=status_code
             )
             
         return UGJSONResponse(
             content={"answer": answer},
-            message="Social Science answer generated successfully"
+            status_code=status_code
         )
         
     except Exception as e:
         return UGJSONResponse(
-            content={},
-            message=f"Error learning social science: {str(e)}",
+            content={"answer": f"Error learning social science: {str(e)}"},
             status_code=500
         )
 
@@ -147,20 +145,18 @@ async def learn_mathematics(
         
         if status_code != 200:
             return UGJSONResponse(
-                content={},
-                message=answer,
+                content={"answer": answer},
                 status_code=status_code
             )
             
         return UGJSONResponse(
             content={"answer": answer},
-            message="Mathematics answer generated successfully"
+            status_code=status_code
         )
         
     except Exception as e:
         return UGJSONResponse(
-            content={},
-            message=f"Error learning mathematics: {str(e)}",
+            content={"answer": f"Error learning mathematics: {str(e)}"},
             status_code=500
         )
 
@@ -245,20 +241,18 @@ async def learn_hindi(
         
         if status_code != 200:
             return UGJSONResponse(
-                content={},
-                message=answer,
+                content={"answer": answer},
                 status_code=status_code
             )
             
         return UGJSONResponse(
             content={"answer": answer},
-            message="Hindi answer generated successfully"
+            status_code=status_code
         )
         
     except Exception as e:
         return UGJSONResponse(
-            content={},
-            message=f"Error learning Hindi: {str(e)}",
+            content={"answer": f"Error learning Hindi: {str(e)}"},
             status_code=500
         )
 
@@ -303,19 +297,17 @@ async def learn_subject(
         if status_code != 200:
             return UGJSONResponse(
                 content={"answer": answer},
-                message=answer,
                 status_code=status_code
             )
             
         return UGJSONResponse(
             content={"answer": answer},
-            message=f"{subject.capitalize()} answer generated successfully"
+            status_code=status_code
         )
         
     except Exception as e:
         return UGJSONResponse(
-            content={},
-            message=f"Error learning {subject}: {str(e)}",
+            content={"answer": f"Error learning {subject}: {str(e)}"},
             status_code=500
         )
 
@@ -347,8 +339,7 @@ async def stream_tts_audio(
         # Validate text
         if not text or not text.strip():
             return UGJSONResponse(
-                content={},
-                message="Text is required for TTS conversion",
+                content={"answer": "Text is required for TTS conversion"},
                 status_code=400
             )
         
@@ -376,8 +367,7 @@ async def stream_tts_audio(
         
     except Exception as e:
         return UGJSONResponse(
-            content={},
-            message=f"Error streaming TTS audio: {str(e)}",
+            content={"answer": f"Error streaming TTS audio: {str(e)}"},
             status_code=500
         )
 
@@ -403,12 +393,11 @@ async def get_available_voices(
         
         return UGJSONResponse(
             content={"voices": voices},
-            message="Available voices retrieved successfully"
+            status_code=200
         )
         
     except Exception as e:
         return UGJSONResponse(
-            content={},
-            message=f"Error retrieving voices: {str(e)}",
+            content={"answer": f"Error retrieving voices: {str(e)}"},
             status_code=500
         ) 
