@@ -191,6 +191,7 @@ class PDFProcessingService:
     def __init__(self, 
                  pdf_repository: Optional[PDFRepository] = None,
                  redis_client: Optional[redis.Redis] = None,
+                 websocket_manager=None,
                  openai_api_key: Optional[str] = None,
                  max_workers: int = 5):
         """Initialize the PDF processing service.
@@ -198,11 +199,13 @@ class PDFProcessingService:
         Args:
             pdf_repository: Repository for PDF storage operations
             redis_client: Redis client for queue management
+            websocket_manager: WebSocket manager for real-time updates
             openai_api_key: API key for OpenAI. If None, uses the one from settings.
             max_workers: Maximum number of concurrent PDF processing workers
         """
         self.pdf_repository = pdf_repository or PDFRepository()
         self.redis_client = redis_client or redis.from_url(settings.REDIS_URL)
+        self.websocket_manager = websocket_manager
         self.api_key = openai_api_key or settings.OPENAI_API_KEY
         self.max_workers = max_workers
         self.worker_semaphore = asyncio.Semaphore(max_workers)
@@ -279,13 +282,17 @@ class PDFProcessingService:
                     )
                     
                     # Record success in Redis
+                    success_status = {
+                        "status": "completed",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
                     await self.redis_client.hset(
                         f"pdf_processing_status:{pdf_document.id}",
-                        mapping={
-                            "status": "completed",
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                        mapping=success_status
                     )
+                    
+                    # Publish success event
+                    await self._publish_status_update(pdf_document.id, success_status)
                 else:
                     # Mark as failed
                     self.pdf_repository.update_pdf_status(
@@ -295,14 +302,18 @@ class PDFProcessingService:
                     )
                     
                     # Record failure in Redis
+                    failure_status = {
+                        "status": "failed",
+                        "error": "Error processing PDF",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
                     await self.redis_client.hset(
                         f"pdf_processing_status:{pdf_document.id}",
-                        mapping={
-                            "status": "failed",
-                            "error": "Error processing PDF",
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                        mapping=failure_status
                     )
+                    
+                    # Publish failure event
+                    await self._publish_status_update(pdf_document.id, failure_status)
             
             except Exception as e:
                 error_message = str(e)
@@ -316,14 +327,18 @@ class PDFProcessingService:
                 )
                 
                 # Record error in Redis
+                error_status = {
+                    "status": "failed",
+                    "error": error_message,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
                 await self.redis_client.hset(
                     f"pdf_processing_status:{pdf_document.id}",
-                    mapping={
-                        "status": "failed",
-                        "error": error_message,
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
+                    mapping=error_status
                 )
+                
+                # Publish error event
+                await self._publish_status_update(pdf_document.id, error_status)
     
     async def process_pdf(self, pdf_document: PDFDocument, user_id: str) -> bool:
         """Process a PDF document and store its contents (async version).
@@ -351,11 +366,24 @@ class PDFProcessingService:
                 }
             )
             
+            # Publish processing started event
+            await self._publish_status_update(pdf_id, {
+                "status": "processing",
+                "start_time": datetime.utcnow().isoformat(),
+                "step": "started"
+            })
+            
             # Extract images from PDF first (async)
             await self.redis_client.hset(
                 f"pdf_processing_status:{pdf_id}",
                 mapping={"step": "extracting_images"}
             )
+            
+            # Publish image extraction step
+            await self._publish_status_update(pdf_id, {
+                "status": "processing",
+                "step": "extracting_images"
+            })
             
             image_data = await self._extract_images_from_pdf_async(file_path, user_id, pdf_id)
             
@@ -365,6 +393,12 @@ class PDFProcessingService:
                     f"pdf_processing_status:{pdf_id}",
                     mapping={"step": "extracting_text"}
                 )
+                
+                # Publish text extraction step
+                await self._publish_status_update(pdf_id, {
+                    "status": "processing",
+                    "step": "extracting_text"
+                })
                 
                 chunks, page_count = await self._extract_text_async(file_path)
                 print(f"Chunks: {len(chunks)}")
@@ -399,6 +433,12 @@ class PDFProcessingService:
                     mapping={"step": "storing_chunks_in_mongodb"}
                 )
                 
+                # Publish MongoDB storage step
+                await self._publish_status_update(pdf_id, {
+                    "status": "processing",
+                    "step": "storing_chunks_in_mongodb"
+                })
+                
                 pdf_chunks = []
                 for i, chunk in enumerate(chunks):
                     chunk_obj = PDFChunk(
@@ -419,6 +459,13 @@ class PDFProcessingService:
                         mapping={"step": "processing_image_captions"}
                     )
                     
+                    # Publish image caption processing step
+                    await self._publish_status_update(pdf_id, {
+                        "status": "processing",
+                        "step": "processing_image_captions",
+                        "images_extracted": len(image_data)
+                    })
+                    
                     # Store image captions in PGVector with a separate collection (async)
                     await self._store_image_captions_in_vector_db_async(pdf_id, image_data, user_id)
                 
@@ -427,6 +474,12 @@ class PDFProcessingService:
                     f"pdf_processing_status:{pdf_id}",
                     mapping={"step": "storing_in_vector_db"}
                 )
+                
+                # Publish vector DB storage step
+                await self._publish_status_update(pdf_id, {
+                    "status": "processing",
+                    "step": "storing_in_vector_db"
+                })
                 
                 await self._store_chunks_in_vector_db_async(pdf_id, pdf_chunks, user_id)
                 
@@ -450,15 +503,20 @@ class PDFProcessingService:
                         await self._update_pdf_document_async(pdf_id, {"metadata": current_metadata_dict})
                 
                 # Update Redis status
+                completion_status = {
+                    "status": "completed",
+                    "end_time": datetime.utcnow().isoformat(),
+                    "step": "completed",
+                    "images_extracted": len(image_data)
+                }
+                
                 await self.redis_client.hset(
                     f"pdf_processing_status:{pdf_id}",
-                    mapping={
-                        "status": "completed",
-                        "end_time": datetime.utcnow().isoformat(),
-                        "step": "completed",
-                        "images_extracted": len(image_data)
-                    }
+                    mapping=completion_status
                 )
+                
+                # Publish completion event
+                await self._publish_status_update(pdf_id, completion_status)
                 
                 return True
                 
@@ -470,14 +528,19 @@ class PDFProcessingService:
                 await self._update_pdf_status_async(pdf_id, ProcessingStatus.FAILED, error_message)
                 
                 # Update Redis status
+                failure_status = {
+                    "status": "failed",
+                    "error": error_message,
+                    "end_time": datetime.utcnow().isoformat()
+                }
+                
                 await self.redis_client.hset(
                     f"pdf_processing_status:{pdf_id}",
-                    mapping={
-                        "status": "failed",
-                        "error": error_message,
-                        "end_time": datetime.utcnow().isoformat()
-                    }
+                    mapping=failure_status
                 )
+                
+                # Publish failure event
+                await self._publish_status_update(pdf_id, failure_status)
                 
                 # Log error details
                 await self.redis_client.hset(
@@ -498,14 +561,19 @@ class PDFProcessingService:
             await self._update_pdf_status_async(pdf_id, ProcessingStatus.FAILED, error_message)
             
             # Update Redis status
+            unexpected_failure_status = {
+                "status": "failed",
+                "error": error_message,
+                "end_time": datetime.utcnow().isoformat()
+            }
+            
             await self.redis_client.hset(
                 f"pdf_processing_status:{pdf_id}",
-                mapping={
-                    "status": "failed",
-                    "error": error_message,
-                    "end_time": datetime.utcnow().isoformat()
-                }
+                mapping=unexpected_failure_status
             )
+            
+            # Publish unexpected failure event
+            await self._publish_status_update(pdf_id, unexpected_failure_status)
             
             return False
     
@@ -588,6 +656,27 @@ class PDFProcessingService:
         # Run the database operation in a thread pool
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self.thread_pool, _update_status_sync)
+    
+    async def _publish_status_update(self, pdf_id: str, status_data: Dict[str, Any]):
+        """Publish status update to WebSocket connections for real-time notifications.
+        
+        Args:
+            pdf_id: ID of the PDF document
+            status_data: Status data to publish
+        """
+        try:
+            # Broadcast to WebSocket connections
+            if self.websocket_manager:
+                await self.websocket_manager.send_to_pdf_connections(pdf_id, {
+                    "type": "status",
+                    "data": status_data
+                })
+                print(f"Broadcast status update to WebSocket connections for PDF {pdf_id}")
+            else:
+                print(f"No WebSocket manager available for PDF {pdf_id}")
+                
+        except Exception as e:
+            print(f"Error publishing status update: {str(e)}")
     
     async def _store_pdf_text_async(self, student_id: str, pdf_id: str, title: str, content: str, page_count: int, metadata: Dict):
         """Async version of storing PDF text.
