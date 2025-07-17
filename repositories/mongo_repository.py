@@ -259,6 +259,62 @@ class HistoryRepository(MongoRepository):
                    .skip(skip)
                    .limit(page_size))
     
+    def get_available_dates(self, student_id: str, from_date: datetime, limit: int = 5) -> List[str]:
+        """Get available dates where messages exist, starting from a given date.
+        
+        Args:
+            student_id: ID of the student
+            from_date: Date to start searching from (inclusive)
+            limit: Maximum number of dates to return (default: 5)
+            
+        Returns:
+            List of date strings in YYYY-MM-DD format, sorted by most recent first
+        """
+        collection = self.get_collection(student_id, "sahasra_history")
+        
+        # Create aggregation pipeline to get unique dates
+        pipeline = [
+            {
+                "$match": {
+                    "time": {"$lte": from_date}  # Messages on or before the given date
+                }
+            },
+            {
+                "$addFields": {
+                    "date_only": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%d",
+                            "date": "$time"
+                        }
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$date_only",
+                    "latest_time": {"$max": "$time"}  # Keep the latest time for sorting
+                }
+            },
+            {
+                "$sort": {"latest_time": -1}  # Sort by most recent first
+            },
+            {
+                "$limit": limit
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "date": "$_id"
+                }
+            }
+        ]
+        
+        # Execute aggregation pipeline
+        results = list(collection.aggregate(pipeline))
+        
+        # Extract just the date strings
+        return [result["date"] for result in results]
+    
     def get_assessments(self, student_id: str, from_date: datetime = None, subject: str = None, topic: str = None) -> List[Dict]:
         """Get user assessments from a specific date and optionally filtered by subject or topic.
         

@@ -8,7 +8,7 @@ from models.u_models import (
     AssessmentGenerationResponse, AssessmentSubmissionResponse, AssessmentListResponse,
     AssessmentByIdResponse, FeedbackResponse, ProgressResponse, SubjectProgress,
     AssessmentSubmissionsListResponse, AssessmentPDFListResponse, SubjectHistoryResponse,
-    AssessmentHistoryItem, AssessmentSubmissionItem
+    AssessmentHistoryItem, AssessmentSubmissionItem, HistoryDatesResponse
 )
 from services.assessment.assessment_service import AssessmentService
 from routers.auth import auth_middleware
@@ -378,5 +378,58 @@ def get_subject_history(
     except Exception as e:
         return UGJSONResponse(
             content={"Message": f"Error getting history: {str(e)}"},
+            status_code=500
+        )
+
+@router.get("/history-dates", response_model=HistoryDatesResponse)
+def get_history_dates(
+    request: Request,
+    student_id: str = Depends(auth_middleware),
+    date: str = None
+):
+    """Get available dates where messages exist in history.
+    
+    Args:
+        request: FastAPI request object
+        student_id: ID of the student (from auth middleware)
+        date: Date to search from in ISO format (YYYY-MM-DD). If not provided, uses current date.
+        
+    Returns:
+        JSON response with list of available dates (up to 5 most recent)
+    """
+    try:
+        # Parse the input date or use current date
+        if date:
+            try:
+                # Parse date string (YYYY-MM-DD format)
+                search_date = datetime.fromisoformat(date)
+            except ValueError:
+                return UGJSONResponse(
+                    content={"Message": "Invalid date format. Use YYYY-MM-DD format"},
+                    status_code=400
+                )
+        else:
+            # Use current date if no date provided
+            search_date = datetime.utcnow()
+        
+        # Get available dates from the repository
+        available_dates = history_repository.get_available_dates(
+            student_id=student_id,
+            from_date=search_date,
+            limit=5
+        )
+        
+        return UGJSONResponse(
+            content={
+                "search_date": search_date.strftime("%Y-%m-%d"),
+                "available_dates": available_dates,
+                "count": len(available_dates)
+            },
+            status_code=200
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"Message": f"Error getting available dates: {str(e)}"},
             status_code=500
         ) 
