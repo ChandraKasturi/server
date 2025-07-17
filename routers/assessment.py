@@ -8,7 +8,7 @@ from models.u_models import (
     AssessmentGenerationResponse, AssessmentSubmissionResponse, AssessmentListResponse,
     AssessmentByIdResponse, FeedbackResponse, ProgressResponse, SubjectProgress,
     AssessmentSubmissionsListResponse, AssessmentPDFListResponse, SubjectHistoryResponse,
-    AssessmentHistoryItem, AssessmentSubmissionItem, HistoryDatesResponse
+    AssessmentHistoryItem, AssessmentSubmissionItem, HistoryDatesResponse, HistoryDatesData
 )
 from services.assessment.assessment_service import AssessmentService
 from routers.auth import auth_middleware
@@ -381,7 +381,7 @@ def get_subject_history(
             status_code=500
         )
 
-@router.get("/history-dates", response_model=HistoryDatesResponse)
+@router.get("/history-dates", response_model=HistoryDatesData)
 def get_history_dates(
     request: Request,
     student_id: str = Depends(auth_middleware),
