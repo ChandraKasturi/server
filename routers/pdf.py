@@ -105,7 +105,7 @@ async def upload_pdf(
         )
         
         return UGJSONResponse(
-            data=pdf_document.model_dump_json(),
+            data=pdf_document.model_dump(),
             message="PDF uploaded successfully and queued for processing"
         )
     except ValueError as e:
@@ -143,7 +143,7 @@ async def list_pdfs(
     try:
         pdfs = pdf_upload_service.get_user_pdfs(user_id, subject)
         return UGJSONResponse(
-            data=[pdf.model_dump_json() for pdf in pdfs],
+            data=[pdf.model_dump() for pdf in pdfs],
             message="PDF documents retrieved successfully"
         )
     except Exception as e:
@@ -194,7 +194,7 @@ async def get_pdf(
         processing_status = await redis_client.hgetall(f"pdf_processing_status:{pdf_id}")
         
         # Combine with PDF data
-        pdf_data = pdf.model_dump_json()
+        pdf_data = pdf.model_dump()
        
         print(f"PDF data: {pdf_data}")
         return UGJSONResponse(

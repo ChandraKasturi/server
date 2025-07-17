@@ -1,6 +1,7 @@
 from pydantic import BaseModel,RootModel,Field
-from typing import List,Dict,Optional,Union
+from typing import List,Dict,Optional,Union,Any
 from datetime import datetime
+from models.pdf_models import PDFDocumentMetadata
 
 
 class uTweet(BaseModel):
@@ -335,35 +336,40 @@ class TranslateRequest(BaseModel):
     language: str
 
 # PDF RESPONSES (matching UGJSONResponse data field)
-class PDFUploadData(BaseModel):
-    """Data field for PDF upload response"""
-    pdf_document_json: str  # Serialized PDFDocument
+class PDFDocumentData(BaseModel):
+    """Actual PDF document data (not serialized JSON)"""
+    id: str
+    user_id: str
+    file_name: str
+    file_path: str
+    file_size: int
+    title: str
+    description: Optional[str] = None
+    pages: Optional[int] = None
+    upload_date: str
+    processing_status: str
+    processing_error: Optional[str] = None
+    process_start_time: Optional[str] = None
+    process_end_time: Optional[str] = None
+    metadata: PDFDocumentMetadata
 
 class PDFUploadResponse(BaseModel):
     """Response from PDF upload"""
     status: int
     message: str
-    data: PDFUploadData
-
-class PDFListData(BaseModel):
-    """Data field for PDF list response"""
-    pdf_documents: List[str]  # List of serialized PDFDocument
+    data: PDFDocumentData
 
 class PDFListResponse(BaseModel):
     """Response from PDF list"""
     status: int
     message: str
-    data: PDFListData
-
-class PDFGetData(BaseModel):
-    """Data field for PDF get response"""
-    pdf_document_json: str  # Serialized PDFDocument
+    data: List[PDFDocumentData]
 
 class PDFGetResponse(BaseModel):
     """Response from PDF get"""
     status: int
     message: str
-    data: PDFGetData
+    data: PDFDocumentData
 
 class PDFDeleteData(BaseModel):
     """Data field for PDF delete response"""
@@ -378,14 +384,17 @@ class PDFDeleteResponse(BaseModel):
 class PDFProcessingRedisStatus(BaseModel):
     """Redis status fields from processing status"""
     status: Optional[str] = None
-    progress: Optional[str] = None
-    current_task: Optional[str] = None
+    start_time: Optional[str] = None
+    step: Optional[str] = None
+    end_time: Optional[str] = None
+    images_extracted: Optional[str] = None
+    timestamp: Optional[str] = None
 
-class PDFProcessingRedisErrors(BaseModel):
+
+class PDFProcessingRedisError(BaseModel):
     """Redis error fields from processing status"""
-    error_type: Optional[str] = None
-    error_message: Optional[str] = None
-    error_timestamp: Optional[str] = None
+    error: Optional[str] = None
+    timestamp: Optional[str] = None
 
 class PDFProcessingStatusData(BaseModel):
     """Processing status data from PDF status endpoint"""
@@ -394,7 +403,7 @@ class PDFProcessingStatusData(BaseModel):
     completed_at: str
     error: Optional[str] = None
     redis_status: Optional[PDFProcessingRedisStatus] = None
-    redis_errors: Optional[PDFProcessingRedisErrors] = None
+    redis_errors: Optional[PDFProcessingRedisError] = None
 
 class PDFProcessingStatusResponse(BaseModel):
     """Response from PDF processing status"""
@@ -445,6 +454,19 @@ class PDFQuestionGenerationResponse(BaseModel):
     status: int
     message: str
     data: PDFQuestionGenerationData
+
+# HISTORY DATES RESPONSE
+class HistoryDatesData(BaseModel):
+    """Data field for history dates response"""
+    search_date: str
+    available_dates: List[str]
+    count: int
+
+class HistoryDatesResponse(BaseModel):
+    """Response from history dates endpoint"""
+    status: int
+    message: str
+    data: HistoryDatesData
 
 # FEEDBACK RESPONSE
 class FeedbackResponse(BaseModel):
