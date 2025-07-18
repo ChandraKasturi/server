@@ -424,9 +424,10 @@ class PDFProcessingStartResponse(BaseModel):
 class PDFLearnAnswerData(BaseModel):
     """Answer data from PDF learn endpoint"""
     answer: str
-    source_chunks: List[str]
-    confidence_score: Optional[float] = None
-    relevant_pages: Optional[List[int]] = None
+    has_image: bool
+    image_url: Optional[str] = None
+    image_caption: Optional[str] = None
+    image_page: Optional[int] = None
 
 class PDFLearnResponse(BaseModel):
     """Response from PDF learn endpoint"""
