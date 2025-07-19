@@ -57,20 +57,24 @@ app.include_router(chat.router)
 app.include_router(pdf.router)
 app.include_router(learn.router)
 
-# PDF processing worker with Redis
-pdf_processing_service = PDFProcessingService(
-    redis_client=redis_client,
-    max_workers=settings.REDIS_MAX_WORKERS
-)
-
 @app.on_event("startup")
 async def startup_events():
     """Startup events for the application."""
+    # Import websocket manager from pdf router to ensure WebSocket notifications work
+    from routers.pdf import websocket_manager
+    
+    # PDF processing worker with Redis and WebSocket support
+    pdf_processing_service = PDFProcessingService(
+        redis_client=redis_client,
+        websocket_manager=websocket_manager,
+        max_workers=settings.REDIS_MAX_WORKERS
+    )
+    
     # Start the PDF processing worker
     asyncio.create_task(pdf_processing_service.process_queued_pdfs())
     
     # Log startup
-    print(f"Started PDF processing worker with {settings.REDIS_MAX_WORKERS} worker threads")
+    print(f"Started PDF processing worker with {settings.REDIS_MAX_WORKERS} worker threads and WebSocket support")
 
 @app.on_event("shutdown")
 async def shutdown_events():
