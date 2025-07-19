@@ -507,7 +507,7 @@ class AssessmentService:
             [
               {{
                 "question": "The statement to evaluate as true or false",
-                "correct_answer": "true or false (lowercase)",
+                "correctanswer": "true or false (lowercase)",
                 "explaination": "Explanation of why the statement is true or false",
                 "question_type": "TRUEFALSE"
               }},
@@ -609,14 +609,14 @@ class AssessmentService:
                 elif q_type == "TRUEFALSE":
                     if "question" not in q:
                         q["question"] = ""
-                    if "correct_answer" not in q:
-                        q["correct_answer"] = "true"
+                    if "correctanswer" not in q:
+                        q["correctanswer"] = "true"
                     if "explaination" not in q:
                         q["explaination"] = ""
                     
                     # Ensure the correct_answer is lowercase (true or false)
-                    if isinstance(q.get("correct_answer"), str):
-                        q["correct_answer"] = q["correct_answer"].lower()
+                    if isinstance(q.get("correctanswer"), str):
+                        q["correctanswer"] = q["correctanswer"].lower()
                 
                 # Ensure question_type is included
                 if "question_type" not in q:
@@ -906,7 +906,7 @@ class AssessmentService:
                 
                 elif question_type == "TRUEFALSE":
                     # For true/false questions
-                    correct_answer = question.get("correct_answer", "").lower()
+                    correct_answer = question.get("correctanswer", "").lower()
                     student_answer_normalized = student_answer.lower().strip()
                     
                     # Handle various forms of true/false answers
@@ -965,8 +965,8 @@ class AssessmentService:
                 
                 # For TRUEFALSE questions, include correct answer
                 elif question.get("question_type") == "TRUEFALSE":
-                    if "correct_answer" in question:
-                        result["correct_answer"] = question["correct_answer"]
+                    if "correctanswer" in question:
+                        result["correctanswer"] = question["correctanswer"]
                 
                 # Include score for text-based questions
                 if "score" in question:
@@ -1505,7 +1505,7 @@ class AssessmentService:
             [
               {{
                 "question": "The statement to evaluate as true or false",
-                "correct_answer": "true or false (lowercase)",
+                "correctanswer": "true or false (lowercase)",
                 "explanation": "Explanation of why the statement is true or false",
                 "question_type": "TRUEFALSE"
               }},
@@ -1569,10 +1569,10 @@ class AssessmentService:
                     q["question_type"] = question_type
                     
                 # Handle specific question type validation
-                if question_type == "TRUEFALSE" and "correct_answer" in q:
+                if question_type == "TRUEFALSE" and "correctanswer" in q:
                     # Ensure the correct_answer is lowercase (true or false)
-                    if isinstance(q["correct_answer"], str):
-                        q["correct_answer"] = q["correct_answer"].lower()
+                    if isinstance(q["correctanswer"], str):
+                        q["correctanswer"] = q["correctanswer"].lower()
                 
             return questions
         except json.JSONDecodeError:
@@ -1591,10 +1591,10 @@ class AssessmentService:
                             q["question_type"] = question_type
                             
                         # Handle specific question type validation
-                        if question_type == "TRUEFALSE" and "correct_answer" in q:
+                        if question_type == "TRUEFALSE" and "correctanswer" in q:
                             # Ensure the correct_answer is lowercase (true or false)
-                            if isinstance(q["correct_answer"], str):
-                                q["correct_answer"] = q["correct_answer"].lower()
+                            if isinstance(q["correctanswer"], str):
+                                q["correctanswer"] = q["correctanswer"].lower()
                                 
                     return questions
             except:
@@ -1698,9 +1698,9 @@ class AssessmentService:
         """
         filtered_questions = []
         # Define fields that are safe to send in generation response
-        safe_fields = ["question", "option1", "option2", "option3", "option4", "correctanswer", 
+        safe_fields = ["question", "option1", "option2", "option3", "option4", 
                       "question_type", "subject", "topic", "subtopic", "level", "questionset", 
-                      "marks", "created_at", "_id", "id", "answers", "correct_answer", 
+                      "marks", "created_at", "_id", "id", 
                       "expected_length", "scenario_type", "pdf_id", "generated_at", "image_url", 
                       "image_caption", "has_image"]
         
