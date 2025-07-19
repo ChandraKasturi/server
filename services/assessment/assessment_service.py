@@ -194,10 +194,13 @@ class AssessmentService:
                 )
             
             # Return assessment data
+            # Filter out sensitive fields from questions for the response
+            filtered_questions = self._filter_sensitive_fields(db_questions)
+            
             return {
                 "message": "Assessment generated successfully",
                 "assessment_id": assessment_id,
-                "questions": db_questions
+                "questions": filtered_questions
             }, 200
             
         except Exception as e:
@@ -930,8 +933,45 @@ class AssessmentService:
                 result = {
                     "questionid": question_id,
                     "is_correct": is_correct,
-                    "feedback": feedback
+                    "feedback": feedback,
+                    "student_answer": student_answer,
+                    "question": question.get("question", ""),
+                    "question_type": question.get("question_type", "MCQ")
                 }
+                
+                # Add sensitive fields that were hidden during generation
+                if "model_answer" in question:
+                    result["model_answer"] = question["model_answer"]
+                
+                if "grading_criteria" in question:
+                    result["grading_criteria"] = question["grading_criteria"]
+                    
+                if "explaination" in question:
+                    result["explaination"] = question["explaination"]
+                    
+                # For MCQ questions, include options and correct answer
+                if question.get("question_type") == "MCQ":
+                    for i in range(1, 5):
+                        option_key = f"option{i}"
+                        if option_key in question:
+                            result[option_key] = question[option_key]
+                    if "correctanswer" in question:
+                        result["correctanswer"] = question["correctanswer"]
+                
+                # For FILL_BLANKS questions, include answers
+                elif question.get("question_type") == "FILL_BLANKS":
+                    if "answers" in question:
+                        result["answers"] = question["answers"]
+                
+                # For TRUEFALSE questions, include correct answer
+                elif question.get("question_type") == "TRUEFALSE":
+                    if "correct_answer" in question:
+                        result["correct_answer"] = question["correct_answer"]
+                
+                # Include score for text-based questions
+                if "score" in question:
+                    result["score"] = question["score"]
+                
                 results.append(result)
                 
                 if is_correct:
@@ -1174,11 +1214,27 @@ class AssessmentService:
             # Store assessment in MongoDB
             assessment_id = self.history_repo.add_assessment(student_id, assessment)
             
+            # Filter out sensitive fields from questions for the response
+            filtered_questions = self._filter_sensitive_fields(questions)
+            
+            # Create filtered assessment object for response
+            filtered_assessment = {
+                "id": assessment["id"],
+                "pdf_id": pdf_id,
+                "title": assessment["title"],
+                "description": assessment["description"],
+                "questions": filtered_questions,
+                "student_id": student_id,
+                "created_at": assessment["created_at"],
+                "question_count": len(filtered_questions),
+                "question_types": question_types
+            }
+            
             # Return assessment data
             return {
                 "Message": "Assessment generated successfully",
                 "assessment_id": assessment_id,
-                "assessment": assessment
+                "assessment": filtered_assessment
             }, 200
             
         except Exception as e:
@@ -1630,3 +1686,29 @@ class AssessmentService:
             print(f"Error adding images to questions: {str(e)}")
             
         return questions 
+
+    def _filter_sensitive_fields(self, questions: List[Dict]) -> List[Dict]:
+        """Filter out sensitive fields from questions for generation response.
+        
+        Args:
+            questions: List of questions with all fields
+            
+        Returns:
+            List of questions with only safe fields for client response
+        """
+        filtered_questions = []
+        # Define fields that are safe to send in generation response
+        safe_fields = ["question", "option1", "option2", "option3", "option4", "correctanswer", 
+                      "question_type", "subject", "topic", "subtopic", "level", "questionset", 
+                      "marks", "created_at", "_id", "id", "answers", "correct_answer", 
+                      "expected_length", "scenario_type", "pdf_id", "generated_at", "image_url", 
+                      "image_caption", "has_image"]
+        
+        for q in questions:
+            filtered_q = {}
+            for field in safe_fields:
+                if field in q:
+                    filtered_q[field] = q[field]
+            filtered_questions.append(filtered_q)
+            
+        return filtered_questions 
