@@ -634,7 +634,7 @@ class AssessmentService:
                         # If insertion was successful, the _id field was added to question_copy
                         # Add it to original question
                         if '_id' in question_copy:
-                            q['id'] = str(question_copy['_id'])
+                            q['_id'] = str(question_copy['_id'])
                     else:
                         print(f"Failed to insert question into question bank: {q['question']}")
                 except Exception as e:
