@@ -1,6 +1,7 @@
 import pymongo
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Union
+from zoneinfo import ZoneInfo
+from typing import Dict, List, Optional, Any, Union, Tuple
 from bson.objectid import ObjectId
 
 from config import settings
@@ -200,6 +201,83 @@ class QuestionRepository(MongoRepository):
     def get_all_topics_subtopics(self) -> List[Dict]:
         """Get all subject topics and subtopics."""
         return list(self.topic_subtopic_collection.find({}, {"_id": 0}))
+    
+    def get_questions_by_topic_subject(self, subject: str, topic: str) -> List[Dict]:
+        """Get all questions filtered by subject and topic.
+        
+        Args:
+            subject: Subject to filter by
+            topic: Topic to filter by
+            
+        Returns:
+            List of all question dictionaries matching the criteria
+        """
+        query = {}
+        
+        # Add subject filter if provided
+        if subject:
+            query["subject"] = {"$regex": f"^{subject}$", "$options": "i"}  # Case-insensitive exact match
+            
+        # Add topic filter if provided
+        if topic:
+            query["topic"] = {"$regex": f"^{topic}$", "$options": "i"}  # Case-insensitive exact match
+        
+        # Convert ObjectId to string for easier handling in API responses
+        questions = list(self.questions_collection.find(query))
+        for question in questions:
+            if "_id" in question:
+                question["_id"] = str(question["_id"])
+                
+        return questions
+    
+    def update_question_document(self, question_data: Dict) -> Tuple[bool, str, Optional[datetime]]:
+        """Update an entire document in the question_bank collection.
+        
+        Args:
+            question_data: Complete question document with _id field
+            
+        Returns:
+            Tuple of (success: bool, message: str, updated_at: datetime)
+        """
+        try:
+            print(f"Question data: {question_data}")
+            # Extract the _id from the document
+            if "_id" not in question_data:
+                return False, "Document must contain an '_id' field", None
+            
+            document_id = question_data["_id"]
+            
+            # Convert string ObjectId to ObjectId if needed
+            if isinstance(document_id, str):
+                try:
+                    document_id = ObjectId(document_id)
+                except Exception as e:
+                    return False, f"Invalid ObjectId format: {str(e)}", None
+            
+            # Remove _id from the update data (we'll use it as filter)
+            update_data = {k: v for k, v in question_data.items() if k != "_id"}
+            
+            # Add updated_at timestamp in Asia/Kolkata timezone
+            kolkata_tz = ZoneInfo('Asia/Kolkata')
+            updated_at = datetime.now(kolkata_tz)
+            update_data["updated_at"] = updated_at
+            
+            # Perform the update
+            result = self.questions_collection.update_one(
+                {"_id": document_id},
+                {"$set": update_data},
+                upsert=False  # Don't create if doesn't exist
+            )
+            
+            if result.matched_count == 0:
+                return False, f"No document found with _id: {document_id}", None
+            elif result.modified_count == 0:
+                return True, "Document found but no changes were needed", updated_at
+            else:
+                return True, f"Document updated successfully. Modified count: {result.modified_count}", updated_at
+                
+        except Exception as e:
+            return False, f"Error updating document: {str(e)}", None
 
 class FeedbackRepository(MongoRepository):
     """Repository for user feedback operations."""
@@ -458,3 +536,248 @@ class HistoryRepository(MongoRepository):
             history_data["time"] = datetime.utcnow()
         result = collection.insert_one(history_data)
         return str(result.inserted_id) 
+
+    def get_learning_streak(self, student_id: str, subject: str = None, count_ai_messages: bool = False) -> Dict[str, Any]:
+        """Calculate the current learning streak for a student.
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional subject to filter by (if None, counts all subjects)
+            count_ai_messages: If True, counts both user and AI messages; if False, only user messages
+            
+        Returns:
+            Dictionary with streak information including:
+            - current_streak: Number of consecutive days with activity (starting from today)
+            - last_activity_date: Date of last activity
+            - longest_streak: Longest streak in history
+            - total_active_days: Total number of days with activity
+        """
+        collection = self.get_collection(student_id, "sahasra_history")
+        
+        # Build query
+        query = {}
+        if subject and subject.lower() != "all":
+            normalized_subject = subject.replace("-", "_").lower()
+            query["subject"] = {"$regex": f"^{normalized_subject}$", "$options": "i"}
+        
+        if not count_ai_messages:
+            query["is_ai"] = False  # Only count user messages
+        
+        # Get all activity dates using aggregation to ensure no duplicate dates
+        pipeline = [
+            {"$match": query},
+            {
+                "$addFields": {
+                    "date_only": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%d",
+                            "date": "$time"
+                        }
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$date_only",  # This ensures each date appears only once
+                    "message_count": {"$sum": 1},
+                    "latest_time": {"$max": "$time"}
+                }
+            },
+            {
+                "$sort": {"_id": -1}  # Sort by date descending (newest first)
+            }
+        ]
+        
+        activity_dates = list(collection.aggregate(pipeline))
+        
+        if not activity_dates:
+            return {
+                "current_streak": 0,
+                "last_activity_date": None,
+                "longest_streak": 0,
+                "total_active_days": 0
+            }
+        
+        # Convert to date objects (MongoDB aggregation already ensures uniqueness via $group)
+        from datetime import datetime, timedelta
+        active_dates = []
+        
+        for item in activity_dates:
+            date_obj = datetime.strptime(item["_id"], "%Y-%m-%d").date()
+            active_dates.append(date_obj)
+        
+        # Dates should already be sorted from MongoDB, but ensure newest first
+        active_dates.sort(reverse=True)
+        
+        # Calculate current streak (consecutive days from today backwards)
+        today = datetime.utcnow().date()
+        current_streak = 0
+        
+        # Start checking from today
+        check_date = today
+        
+        for active_date in active_dates:
+            # Check if this active date is consecutive with our streak
+            if active_date == check_date:
+                current_streak += 1
+                check_date = check_date - timedelta(days=1)
+            elif active_date == check_date - timedelta(days=1):
+                # Allow for 1-day gap (grace period)
+                current_streak += 1
+                check_date = active_date - timedelta(days=1)
+            else:
+                # Gap is too large, streak is broken
+                break
+        
+        # Calculate longest streak in history
+        longest_streak = 0
+        temp_streak = 1
+        
+        if len(active_dates) > 1:
+            for i in range(1, len(active_dates)):
+                prev_date = active_dates[i-1]  # More recent date
+                curr_date = active_dates[i]    # Older date
+                
+                # Calculate difference between consecutive dates
+                diff = (prev_date - curr_date).days
+                
+                if diff == 1:  # Consecutive days
+                    temp_streak += 1
+                elif diff == 2:  # 1-day gap (grace period)
+                    temp_streak += 1
+                else:
+                    # Gap is too large, start new streak
+                    longest_streak = max(longest_streak, temp_streak)
+                    temp_streak = 1
+            
+            # Don't forget the last streak
+            longest_streak = max(longest_streak, temp_streak)
+        else:
+            longest_streak = 1 if active_dates else 0
+        
+        # Make sure current streak doesn't exceed longest streak
+        longest_streak = max(longest_streak, current_streak)
+        
+        return {
+            "current_streak": current_streak,
+            "last_activity_date": active_dates[0].isoformat() if active_dates else None,
+            "longest_streak": longest_streak,
+            "total_active_days": len(active_dates)
+        }
+
+    def get_questions_answered_count(self, student_id: str, subject: str = None, from_date: datetime = None) -> Dict[str, int]:
+        """Get count of questions answered (AI responses) for a student.
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional subject to filter by (if None, counts all subjects)
+            from_date: Optional datetime to filter messages from this date onwards
+            
+        Returns:
+            Dictionary with questions answered counts
+        """
+        collection = self.get_collection(student_id, "sahasra_history")
+        
+        # Build query for AI messages (questions answered by AI)
+        query = {"is_ai": True}
+        
+        if subject and subject.lower() != "all":
+            normalized_subject = subject.replace("-", "_").lower()
+            query["subject"] = {"$regex": f"^{normalized_subject}$", "$options": "i"}
+        
+        if from_date:
+            query["time"] = {"$gte": from_date}
+        
+        # Get total count by finding all documents and getting length
+        all_documents = list(collection.find(query))
+        total_count = len(all_documents)
+        
+        # Debug logging
+        print(f"Questions answered query: {query}")
+        print(f"Found {total_count} AI messages for student {student_id}")
+        
+        # Additional debugging - check total documents in collection
+        total_in_collection = len(list(collection.find({})))
+        ai_true_total = len(list(collection.find({"is_ai": True})))
+        print(f"Total documents in collection: {total_in_collection}")
+        print(f"Total documents with is_ai=True: {ai_true_total}")
+        if from_date:
+            print(f"Filtering from date: {from_date}")
+        
+        # Get count by subject
+        pipeline = [
+            {"$match": query},
+            {
+                "$group": {
+                    "_id": "$subject",
+                    "count": {"$sum": 1}
+                }
+            },
+            {"$sort": {"count": -1}}
+        ]
+        
+        by_subject = {}
+        for item in collection.aggregate(pipeline):
+            subject_name = item["_id"] or "unknown"
+            by_subject[subject_name] = item["count"]
+        
+        return {
+            "total_questions_answered": total_count,
+            "by_subject": by_subject
+        }
+
+class QuotesRepository(MongoRepository):
+    """Repository for educational quotes operations."""
+    
+    def __init__(self, mongo_uri: str = None):
+        super().__init__(mongo_uri)
+        self.quotes_collection = self.get_collection(
+            "educational_resources", 
+            "quotes"
+        )
+    
+    def get_quotes_count(self) -> int:
+        """Get the total number of quotes in the collection."""
+        return self.quotes_collection.count_documents({})
+    
+    def add_quotes_bulk(self, quotes_list: List[Dict]) -> bool:
+        """Add multiple quotes at once.
+        
+        Args:
+            quotes_list: List of quote dictionaries with 'quote' and 'author' fields
+            
+        Returns:
+            True if insertion was successful
+        """
+        try:
+            # Add created_at timestamp to each quote
+            for quote in quotes_list:
+                quote["created_at"] = datetime.utcnow()
+            
+            result = self.quotes_collection.insert_many(quotes_list)
+            return len(result.inserted_ids) == len(quotes_list)
+        except Exception as e:
+            print(f"Error inserting quotes: {str(e)}")
+            return False
+    
+    def get_random_quote(self) -> Optional[Dict]:
+        """Get a random educational quote.
+        
+        Returns:
+            Random quote dictionary or None if no quotes exist
+        """
+        try:
+            # Use MongoDB's $sample aggregation to get a random document
+            pipeline = [{"$sample": {"size": 1}}]
+            result = list(self.quotes_collection.aggregate(pipeline))
+            
+            if result:
+                quote = result[0]
+                # Remove MongoDB ObjectId for cleaner response
+                if "_id" in quote:
+                    del quote["_id"]
+                return quote
+            return None
+        except Exception as e:
+            print(f"Error getting random quote: {str(e)}")
+            return None 

@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, Request, Header
+from fastapi import APIRouter, Depends, Request, Header, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from typing import Optional
+from datetime import datetime, timedelta
 
 from models.pdf_models import SubjectLearnRequest, TTSRequest
-from models.u_models import LearnAnswerResponse, TTSVoicesResponse
+from models.u_models import (LearnAnswerResponse, TTSVoicesResponse, LearningInfoResponse, 
+                           FetchQuestionsRequest, FetchQuestionsResponse, 
+                           UpdateQuestionRequest, UpdateQuestionResponse)
 from services.learning.learning_service import LearningService
 from services.learning.tts_service import TTSService
 from routers.auth import auth_middleware
@@ -399,5 +402,163 @@ async def get_available_voices(
     except Exception as e:
         return UGJSONResponse(
             content={"answer": f"Error retrieving voices: {str(e)}"},
+            status_code=500
+        ) 
+
+@router.get("/learning-info", response_model=LearningInfoResponse)
+async def get_learning_info(
+    request: Request,
+    subject: Optional[str] = Query(None, description="Optional subject to filter by (science, social_science, mathematics, english, hindi, or 'all' for all subjects)"),
+    days_back: Optional[int] = Query(None, description="Number of days to look back for questions answered count (default: None for all time)"),
+    x_auth_session: Optional[str] = Header(None),
+    user_id: str = Depends(auth_middleware)
+):
+    """Get comprehensive learning information for a student.
+    
+    Returns:
+    - Learning streak information (consecutive days of learning activity)
+    - Questions answered count (AI responses) with breakdown by subject
+    - Random educational quote to inspire learning
+    
+    Args:
+        request: FastAPI request object
+        subject: Optional subject filter (science, social_science, mathematics, english, hindi, or 'all')
+        days_back: Number of days to look back for questions answered count
+        x_auth_session: JWT token for authentication
+        user_id: User ID extracted from JWT token
+        
+    Returns:
+        UGJSONResponse with comprehensive learning information
+    """
+    try:
+        # Calculate from_date for questions answered count
+        from_date = None
+        if days_back and days_back > 0:
+            from_date = datetime.utcnow() - timedelta(days=days_back)
+        
+        # Normalize subject parameter
+        if subject and subject.lower() == "all":
+            subject = None
+        elif subject:
+            subject = subject.replace("-", "_").lower()
+        
+        # Get comprehensive learning info
+        learning_info, status_code = await learning_service.get_learning_info(
+            student_id=user_id,
+            subject=subject,
+            from_date=from_date
+        )
+        
+        if status_code != 200:
+            return UGJSONResponse(
+                content=learning_info,
+                status_code=status_code
+            )
+        
+        return UGJSONResponse(
+            content=learning_info,
+            status_code=200
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={
+                "message": f"Error getting learning info: {str(e)}",
+                "learning_streak": {
+                    "current_streak": 0,
+                    "last_activity_date": None,
+                    "longest_streak": 0,
+                    "total_active_days": 0
+                },
+                "questions_answered": {
+                    "total_questions_answered": 0,
+                    "by_subject": {}
+                },
+                "educational_quote": {
+                    "quote": "Education is the passport to the future, for tomorrow belongs to those who prepare for it today.",
+                    "author": "Malcolm X"
+                },
+                "generated_at": datetime.utcnow().isoformat(),
+                "student_id": user_id
+            },
+            status_code=500
+        )
+
+@router.post("/questions/fetch", response_model=FetchQuestionsResponse)
+async def fetch_questions_by_topic_subject(
+    request_body: FetchQuestionsRequest,
+    request: Request,
+    x_auth_session: Optional[str] = Header(None),
+    user_id: str = Depends(auth_middleware)
+):
+    """Fetch questions from question_bank collection by topic and subject.
+    
+    Args:
+        request_body: Request containing subject, topic, and amount
+        request: FastAPI request object
+        x_auth_session: JWT token for authentication
+        user_id: User ID extracted from JWT token
+        
+    Returns:
+        UGJSONResponse with list of questions
+    """
+    try:
+        # Get parameters from request
+        subject = request_body.subject
+        topic = request_body.topic
+
+        # Use service to fetch questions
+        result, status_code = await learning_service.fetch_questions_by_topic_subject(
+            subject=subject,
+            topic=topic
+        )
+
+        return UGJSONResponse(
+            content=result,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"message": f"Error fetching questions: {str(e)}"},
+            status_code=500
+        )
+
+@router.put("/questions/update", response_model=UpdateQuestionResponse)
+async def update_question_document(
+    request_body: UpdateQuestionRequest,
+    request: Request,
+    x_auth_session: Optional[str] = Header(None),
+    user_id: str = Depends(auth_middleware)
+):
+    """Update an entire document in the question_bank collection.
+    
+    Args:
+        request_body: Request containing the complete question document with _id
+        request: FastAPI request object
+        x_auth_session: JWT token for authentication
+        user_id: User ID extracted from JWT token
+        
+    Returns:
+        UGJSONResponse with update result
+    """
+    try:
+        # Get question data from request
+        question_data = request_body.question_data
+
+        # Use service to update question document
+        result, status_code = await learning_service.update_question_document(question_data)
+
+        return UGJSONResponse(
+            content=result,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={
+                "success": False,
+                "message": f"Error updating question document: {str(e)}"
+            },
             status_code=500
         ) 

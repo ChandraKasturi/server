@@ -1232,7 +1232,7 @@ class PDFQuestionGenerationService:
             
             # Generate content using Gemini
             response = gemini_client.models.generate_content(
-                model="gemini-2.5-pro-preview-05-06",
+                model="gemini-2.5-pro",
                 contents=[uploaded_file, prompt],
             )
             raw_response_content = response.text
@@ -1287,15 +1287,16 @@ class PDFQuestionGenerationService:
         return f"""
 Analyze the provided PDF document and EXTRACT questions from its content.
 For EACH question identified in the document, generate a JSON object.
-Determine the question_type from: "multiple_choice", "VERY_SHORT_ANSWER", "SHORT_ANSWER", "LONG_ANSWER", "CASE_STUDY".
+Determine the question_type from: "MCQ", "VERY_SHORT_ANSWER", "SHORT_ANSWER", "LONG_ANSWER", "CASE_STUDY", "TRUEFALSE".
 The output should be a JSON array containing these objects.
 Write questions and options in LaTeX if needed. Do NOT include an "_id" field in your response.
 IMPORTANT: Make sure to extract all the questions from the document and classify them appropriately:
-- multiple_choice: Has distinct options (A, B, C, D)
+- MCQ: Has distinct options (A, B, C, D)
 - VERY_SHORT_ANSWER: Requires 1-3 words (definitions, terms)
 - SHORT_ANSWER: Requires 1-3 sentences (brief explanations)
 - LONG_ANSWER: Requires detailed explanations (multiple paragraphs)
 - CASE_STUDY: Scenario-based application questions
+- TRUEFALSE: True/False questions
 
 **General Instructions for ALL questions:**
 - "questionset" MUST be "scanned".
@@ -1318,7 +1319,7 @@ If the question is primarily multiple-choice (has distinct options), use this fo
   "explaination": "Provide a detailed explanation for why the correct answer is correct and, if applicable, why the other options are incorrect.  or if present in the document, provide the explanation from the document. This field MUST be filled.",
   "grading_criteria": "Typically for MCQs: 'Full marks if the correct option is selected, zero otherwise.' or similar based on the question's nature. This field MUST be filled.",
   "question_image": "",
-  "question_type": "multiple_choice",
+  "question_type": "MCQ",
   "explaination_image": "",
   "subject": "{subject}",
   "topic": "{topic}",
@@ -1402,6 +1403,24 @@ If the question is a CASE STUDY (scenario-based application), use this format:
   "level": "Determine the difficulty level for this question [1-3] 1 Easy , 2 Medium, 3 Hard",
   "questionset": "scanned",
   "marks": "Extract the marks allocated for this question, if visible. If not, suggest default like 10.",
+  "created_at": "{current_timestamp}",
+  "ignore":True
+}}
+
+If the question is a TRUEFALSE question, use this format:
+{{
+  "question": "Extract the question text from the document (in LaTeX if needed)",
+  "correctanswer": "True or False",
+  "explaination": "Brief explanation about the question and key concepts tested",
+  "question_image": "",
+  "explaination_image": "",
+  "question_type": "TRUEFALSE",
+  "subject": "{subject}",
+  "topic": "{topic}",
+  "subtopic": "{subtopic}",
+  "level": "Determine the difficulty level for this question [1-3] 1 Easy , 2 Medium, 3 Hard",
+  "questionset": "scanned",
+  "marks": "Extract the marks allocated for this question, if visible. If not, suggest default like 1.",
   "created_at": "{current_timestamp}",
   "ignore":True
 }}
@@ -1563,13 +1582,15 @@ Return only the cleaned JSON array:
                             
                     else:
                         # Handle MCQ questions
-                        if question_type not in ["MULTIPLE_CHOICE", "SINGLE_SELECT_MCQ"]:
+                        if question_type not in ["MCQ", "SINGLE_SELECT_MCQ"]:
                             if any(opt_key in item_json for opt_key in ["option1", "option2", "option3", "option4"]):
-                                item_json["question_type"] = "multiple_choice"
+                                item_json["question_type"] = "MCQ"
                             else:
                                 # Default to multiple choice if type is unclear
-                                item_json["question_type"] = "multiple_choice"
-                        
+                                item_json["question_type"] = "MCQ"
+                        if question_type == "TRUEFALSE" and "correctanswer" not in item_json:
+                            item_json["correctanswer"] = ""
+                            
                         # For MCQ questions, ensure correctanswer field exists
                         if "correctanswer" not in item_json:
                             item_json["correctanswer"] = ""

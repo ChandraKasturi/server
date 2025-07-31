@@ -531,3 +531,53 @@ class SubjectHistoryResponse(BaseModel):
     page_size: int
     oldest_first: bool
     has_more: bool
+
+# LEARNING INFO MODELS
+class LearningStreakInfo(BaseModel):
+    """Learning streak information"""
+    current_streak: int
+    last_activity_date: Optional[str]
+    longest_streak: int
+    total_active_days: int
+
+class QuestionsAnsweredInfo(BaseModel):
+    """Questions answered count information"""
+    total_questions_answered: int
+    by_subject: Dict[str, int]
+
+class EducationalQuote(BaseModel):
+    """Educational quote with author"""
+    quote: str
+    author: str
+
+class LearningInfoResponse(BaseModel):
+    """Response from learning-info endpoint"""
+    learning_streak: LearningStreakInfo
+    questions_answered: QuestionsAnsweredInfo
+    educational_quote: EducationalQuote
+    generated_at: str
+    student_id: str
+    subject_filter: Optional[str] = None
+
+class FetchQuestionsRequest(BaseModel):
+    """Request model for fetching questions by topic and subject"""
+    subject: str
+    topic: str
+
+class FetchQuestionsResponse(BaseModel):
+    """Response model for fetched questions"""
+    questions: List[Dict[str, Any]]
+    total_count: int
+    subject: str
+    topic: str
+
+class UpdateQuestionRequest(BaseModel):
+    """Request model for updating a question document"""
+    question_data: Dict[str, Any]
+
+class UpdateQuestionResponse(BaseModel):
+    """Response model for question update"""
+    success: bool
+    message: str
+    document_id: Optional[str] = None
+    updated_at: Optional[str] = None
