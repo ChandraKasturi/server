@@ -1,4 +1,7 @@
 import asyncio
+import base64
+import os
+import uuid
 from typing import List, Dict, Any, Optional, Tuple
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -15,7 +18,7 @@ import concurrent.futures
 
 from config import settings
 from repositories.pdf_repository import PDFRepository
-from repositories.mongo_repository import HistoryRepository
+from repositories.mongo_repository import HistoryRepository, QuotesRepository, QuestionRepository
 
 class LearningService:
     """Service for subject-specific learning using RAG."""
@@ -57,6 +60,8 @@ class LearningService:
         self.ug_llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")'''
         self.pdf_repository = PDFRepository()
         self.history_repository = HistoryRepository()
+        self.quotes_repository = QuotesRepository()
+        self.question_repository = QuestionRepository()
         # Thread pool for blocking operations
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
     
@@ -291,6 +296,168 @@ class LearningService:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self.thread_pool, _store_history_sync)
 
+    def _process_base64_image(self, base64_data: str, field_name: str) -> str:
+        """Process base64 image data and save it to static directory.
+        
+        Args:
+            base64_data: Base64 encoded image data with format "data:image/format;base64,..."
+            field_name: Name of the field (question_image or explaination_image)
+            
+        Returns:
+            URL path to the saved image
+            
+        Raises:
+            ValueError: If base64 data format is invalid
+        """
+        try:
+            # Check if it's base64 image data
+            if not base64_data.startswith("data:image/"):
+                return base64_data  # Return as-is if not base64 image
+            
+            # Parse the base64 data
+            header, image_data = base64_data.split(",", 1)
+            image_format = header.split("/")[1].split(";")[0].lower()  # Extract format (png, jpg, etc.)
+            
+            # Validate image format
+            allowed_formats = ["png", "jpg", "jpeg", "gif", "webp"]
+            if image_format not in allowed_formats:
+                raise ValueError(f"Unsupported image format: {image_format}")
+            
+            # Decode base64 data
+            image_bytes = base64.b64decode(image_data)
+            
+            # Generate unique filename
+            unique_id = str(uuid.uuid4())
+            filename = f"{unique_id}.{image_format}"
+            
+            # Determine subdirectory based on field name
+            if field_name == "question_image":
+                subdirectory = "question_images"
+            elif field_name == "explaination_image":
+                subdirectory = "explaination_images"
+            else:
+                subdirectory = "question_images"  # fallback
+            
+            # Get the correct path to server/static directory
+            # This file is in server/services/learning/learning_service.py
+            # Use absolute path approach to be 100% sure
+            current_file_path = os.path.abspath(__file__)
+            print(f"Absolute file path: {current_file_path}")
+            
+            # Split path and find the actual server directory index
+            path_parts = current_file_path.replace('\\', '/').split('/')
+            print(f"Path parts: {path_parts}")
+            
+            # Find where 'server' appears in the path
+            server_indices = [i for i, part in enumerate(path_parts) if part == 'server']
+            print(f"Server indices found: {server_indices}")
+            
+            if server_indices:
+                # Use the first occurrence of 'server' directory
+                server_index = server_indices[0]
+                server_path_parts = path_parts[:server_index + 1]
+                server_dir = '/'.join(server_path_parts)
+                # Convert back to Windows path format if needed
+                server_dir = server_dir.replace('/', os.sep)
+                print(f"Constructed server path: {server_dir}")
+            else:
+                # Ultimate fallback - use working directory + server
+                working_dir = os.getcwd()
+                server_dir = os.path.join(working_dir, 'server')
+                print(f"Fallback server path: {server_dir}")
+            
+            # Construct static directory path
+            static_dir = os.path.join(server_dir, "static")
+            images_dir = os.path.join(static_dir, subdirectory)
+            
+            print(f"Final static directory: {static_dir}")
+            print(f"Final images directory: {images_dir}")
+            
+            # Validate the server directory
+            if os.path.exists(server_dir):
+                server_contents = os.listdir(server_dir)
+                print(f"Server directory contents: {server_contents}")
+                
+                # Check if this looks like the right server directory
+                expected_dirs = ['services', 'models', 'repositories', 'routers']
+                found_expected = [d for d in expected_dirs if d in server_contents]
+                print(f"Expected server subdirs found: {found_expected}")
+                
+                if len(found_expected) < 2:
+                    print(f"WARNING: This might not be the right server directory!")
+                    print(f"Expected to find: {expected_dirs}")
+                    print(f"Actually found: {server_contents}")
+            else:
+                print(f"WARNING: Server directory does not exist: {server_dir}")
+            
+            # Ensure directory exists
+            os.makedirs(images_dir, exist_ok=True)
+            print(f"Created directory: {images_dir}")
+            
+            # Double-check the directory was created in the right place
+            if os.path.exists(images_dir):
+                print(f"✓ SUCCESS: Directory exists at {images_dir}")
+                # Also check if it's in the right place by verifying the parent structure
+                parent_static = os.path.dirname(images_dir)
+                parent_server = os.path.dirname(parent_static)
+                print(f"✓ Parent static dir: {parent_static}")
+                print(f"✓ Parent server dir: {parent_server}")
+            else:
+                print(f"✗ FAILED: Directory does not exist: {images_dir}")
+                raise ValueError(f"Failed to create directory: {images_dir}")
+            
+            # Save image file
+            file_path = os.path.join(images_dir, filename)
+            with open(file_path, "wb") as f:
+                f.write(image_bytes)
+            
+            print(f"Saved image to: {file_path}")
+            print(f"File size: {len(image_bytes)} bytes")
+            
+            # Return URL path (relative to static directory)
+            url_path = f"/static/{subdirectory}/{filename}"
+            print(f"Generated URL: {url_path}")
+            return url_path
+            
+        except Exception as e:
+            print(f"Error processing base64 image for {field_name}: {str(e)}")
+            print(f"Current working directory: {os.getcwd()}")
+            print(f"Script directory: {os.path.dirname(__file__)}")
+            raise ValueError(f"Invalid base64 image data for {field_name}: {str(e)}")
+
+    async def _process_question_images_async(self, question_data: Dict) -> Dict:
+        """Process base64 images in question data and replace with URLs (async).
+        
+        Args:
+            question_data: Question data that may contain base64 images
+            
+        Returns:
+            Question data with base64 images replaced by URLs
+        """
+        def _process_images_sync():
+            # Create a copy to avoid modifying the original
+            processed_data = question_data.copy()
+            
+            # Process questionimage if present and base64
+            if "question_image" in processed_data and processed_data["question_image"]:
+                if str(processed_data["question_image"]).startswith("data:image/"):
+                    processed_data["question_image"] = self._process_base64_image(
+                        processed_data["question_image"], "question_image"
+                    )
+            
+            # Process explainationimage if present and base64  
+            if "explaination_image" in processed_data and processed_data["explaination_image"]:
+                if str(processed_data["explaination_image"]).startswith("data:image/"):
+                    processed_data["explaination_image"] = self._process_base64_image(
+                        processed_data["explaination_image"], "explaination_image"
+                    )
+            
+            return processed_data
+        
+        # Run the image processing in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _process_images_sync)
+
     async def learn_subject(self, 
                     subject: str, 
                     question: str, 
@@ -487,4 +654,400 @@ class LearningService:
         Returns:
             Tuple of (answer, status_code)
         """
-        return await self.learn_subject("hindi", question, student_id, session_id, include_pdfs) 
+        return await self.learn_subject("hindi", question, student_id, session_id, include_pdfs)
+
+    async def get_learning_streak(self, student_id: str, subject: str = None, count_ai_messages: bool = False) -> Tuple[Dict, int]:
+        """Get learning streak information for a student (async).
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional subject to filter by (if None, counts all subjects)
+            count_ai_messages: If True, counts both user and AI messages; if False, only user messages
+            
+        Returns:
+            Tuple of (streak_info, status_code)
+        """
+        try:
+            def _get_streak_sync():
+                return self.history_repository.get_learning_streak(student_id, subject, count_ai_messages)
+            
+            # Run the database operation in a thread pool
+            loop = asyncio.get_event_loop()
+            streak_info = await loop.run_in_executor(self.thread_pool, _get_streak_sync)
+            
+            return streak_info, 200
+            
+        except Exception as e:
+            error_message = f"Error getting learning streak: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500 
+
+    async def get_questions_answered_count(self, student_id: str, subject: str = None, from_date: datetime = None) -> Tuple[Dict, int]:
+        """Get count of questions answered for a student (async).
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional subject to filter by (if None, counts all subjects)
+            from_date: Optional datetime to filter from this date onwards
+            
+        Returns:
+            Tuple of (questions_count_info, status_code)
+        """
+        try:
+            def _get_count_sync():
+                return self.history_repository.get_questions_answered_count(student_id, subject, from_date)
+            
+            # Run the database operation in a thread pool
+            loop = asyncio.get_event_loop()
+            count_info = await loop.run_in_executor(self.thread_pool, _get_count_sync)
+            
+            return count_info, 200
+            
+        except Exception as e:
+            error_message = f"Error getting questions answered count: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500
+
+    async def ensure_quotes_exist(self) -> bool:
+        """Ensure that educational quotes exist in the database, generate if needed (async).
+        
+        Returns:
+            True if quotes exist or were successfully generated
+        """
+        try:
+            def _check_quotes_sync():
+                return self.quotes_repository.get_quotes_count()
+            
+            # Check if quotes exist
+            loop = asyncio.get_event_loop()
+            quotes_count = await loop.run_in_executor(self.thread_pool, _check_quotes_sync)
+            
+            if quotes_count >= 50:
+                return True
+            
+            # Generate quotes if not enough exist
+            print(f"Only {quotes_count} quotes found, generating 50 educational quotes...")
+            quotes_list = await self.generate_educational_quotes(50)
+            
+            if quotes_list:
+                def _add_quotes_sync():
+                    return self.quotes_repository.add_quotes_bulk(quotes_list)
+                
+                success = await loop.run_in_executor(self.thread_pool, _add_quotes_sync)
+                print(f"Generated and stored {len(quotes_list)} quotes successfully: {success}")
+                return success
+            
+            return False
+            
+        except Exception as e:
+            print(f"Error ensuring quotes exist: {str(e)}")
+            return False
+
+    async def generate_educational_quotes(self, count: int = 50) -> List[Dict]:
+        """Generate educational quotes using LLM (async).
+        
+        Args:
+            count: Number of quotes to generate
+            
+        Returns:
+            List of quote dictionaries with 'quote' and 'author' fields
+        """
+        try:
+            prompt_template = """
+            You are a curator of educational wisdom. Generate {count} inspiring and meaningful quotes about education, learning, knowledge, wisdom, personal growth, and academic achievement.
+            
+            Requirements:
+            1. Include quotes from famous educators, philosophers, scientists, writers, and thought leaders
+            2. Mix historical and contemporary figures
+            3. Ensure quotes are genuinely inspiring and relevant to learning
+            4. Include diverse perspectives and backgrounds
+            5. Each quote should be meaningful and motivational for students
+            
+            Format your response as a JSON array of objects with this exact structure:
+            [
+              {{
+                "quote": "The exact quote text here",
+                "author": "Author Name"
+              }},
+              {{
+                "quote": "Another inspiring quote about education",
+                "author": "Another Author"
+              }}
+            ]
+            
+            Examples of the type of quotes to include:
+            - "Education is the most powerful weapon which you can use to change the world." - Nelson Mandela
+            - "The beautiful thing about learning is that no one can take it away from you." - B.B. King
+            - "Live as if you were to die tomorrow. Learn as if you were to live forever." - Mahatma Gandhi
+            
+            Generate {count} unique, inspiring educational quotes now.
+            """
+            
+            from langchain_core.prompts import PromptTemplate
+            from langchain_core.output_parsers import StrOutputParser
+            
+            prompt = PromptTemplate.from_template(prompt_template)
+            
+            def _generate_quotes_sync():
+                chain = prompt | self.ug_llm | StrOutputParser()
+                return chain.invoke({"count": count})
+            
+            # Run LLM generation in thread pool
+            loop = asyncio.get_event_loop()
+            quotes_json = await loop.run_in_executor(self.thread_pool, _generate_quotes_sync)
+            
+            # Parse the JSON response
+            import json
+            try:
+                # Clean up the response
+                quotes_json = quotes_json.replace("```json", "").replace("```", "").strip()
+                quotes_list = json.loads(quotes_json)
+                
+                # Validate the structure
+                valid_quotes = []
+                for quote in quotes_list:
+                    if isinstance(quote, dict) and "quote" in quote and "author" in quote:
+                        if quote["quote"].strip() and quote["author"].strip():
+                            valid_quotes.append({
+                                "quote": quote["quote"].strip(),
+                                "author": quote["author"].strip()
+                            })
+                
+                print(f"Generated {len(valid_quotes)} valid quotes out of {len(quotes_list)} total")
+                return valid_quotes
+                
+            except json.JSONDecodeError as e:
+                print(f"Error parsing quotes JSON: {str(e)}")
+                # Try to extract JSON using basic pattern matching
+                try:
+                    start_idx = quotes_json.find('[')
+                    end_idx = quotes_json.rfind(']') + 1
+                    if start_idx >= 0 and end_idx > start_idx:
+                        extracted_json = quotes_json[start_idx:end_idx]
+                        quotes_list = json.loads(extracted_json)
+                        
+                        valid_quotes = []
+                        for quote in quotes_list:
+                            if isinstance(quote, dict) and "quote" in quote and "author" in quote:
+                                if quote["quote"].strip() and quote["author"].strip():
+                                    valid_quotes.append({
+                                        "quote": quote["quote"].strip(),
+                                        "author": quote["author"].strip()
+                                    })
+                        
+                        return valid_quotes
+                except:
+                    pass
+                
+                return []
+            
+        except Exception as e:
+            print(f"Error generating educational quotes: {str(e)}")
+            return []
+
+    async def get_random_educational_quote(self) -> Tuple[Dict, int]:
+        """Get a random educational quote (async).
+        
+        Returns:
+            Tuple of (quote_info, status_code)
+        """
+        try:
+            def _get_quote_sync():
+                return self.quotes_repository.get_random_quote()
+            
+            # Try to get a random quote first
+            loop = asyncio.get_event_loop()
+            quote = await loop.run_in_executor(self.thread_pool, _get_quote_sync)
+            
+            # If no quote found, then ensure quotes exist and try again
+            if not quote:
+                print("No quotes found, ensuring quotes exist...")
+                quotes_exist = await self.ensure_quotes_exist()
+                
+                if not quotes_exist:
+                    return {"message": "Unable to load educational quotes"}, 500
+                
+                # Try again after ensuring quotes exist
+                quote = await loop.run_in_executor(self.thread_pool, _get_quote_sync)
+            
+            if quote:
+                return quote, 200
+            else:
+                return {"message": "No quotes available"}, 404
+                
+        except Exception as e:
+            error_message = f"Error getting random quote: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500
+
+    async def get_learning_info(self, student_id: str, subject: str = None, from_date: datetime = None) -> Tuple[Dict, int]:
+        """Get comprehensive learning information for a student (async).
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional subject to filter by (if None, gets all subjects)
+            from_date: Optional datetime to filter data from this date onwards
+            
+        Returns:
+            Tuple of (learning_info, status_code)
+        """
+        try:
+            # Get all the information in parallel
+            streak_task = self.get_learning_streak(student_id, subject, count_ai_messages=False)
+            questions_task = self.get_questions_answered_count(student_id, subject, from_date)
+            quote_task = self.get_random_educational_quote()
+            
+            # Wait for all tasks to complete
+            streak_result, questions_result, quote_result = await asyncio.gather(
+                streak_task, questions_task, quote_task, return_exceptions=True
+            )
+            
+            # Process results
+            learning_info = {}
+            
+            # Handle streak result
+            if isinstance(streak_result, tuple) and streak_result[1] == 200:
+                learning_info["learning_streak"] = streak_result[0]
+            else:
+                learning_info["learning_streak"] = {
+                    "current_streak": 0,
+                    "last_activity_date": None,
+                    "longest_streak": 0,
+                    "total_active_days": 0
+                }
+            
+            # Handle questions result
+            if isinstance(questions_result, tuple) and questions_result[1] == 200:
+                learning_info["questions_answered"] = questions_result[0]
+            else:
+                learning_info["questions_answered"] = {
+                    "total_questions_answered": 0,
+                    "by_subject": {}
+                }
+            
+            # Handle quote result
+            if isinstance(quote_result, tuple) and quote_result[1] == 200:
+                learning_info["educational_quote"] = quote_result[0]
+            else:
+                learning_info["educational_quote"] = {
+                    "quote": "Education is the passport to the future, for tomorrow belongs to those who prepare for it today.",
+                    "author": "Malcolm X"
+                }
+            
+            # Add metadata
+            learning_info["generated_at"] = datetime.utcnow().isoformat()
+            learning_info["student_id"] = student_id
+            if subject:
+                learning_info["subject_filter"] = subject
+            
+            return learning_info, 200
+            
+        except Exception as e:
+            error_message = f"Error getting learning info: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500 
+
+    async def fetch_questions_by_topic_subject(self, subject: str, topic: str) -> Tuple[Dict, int]:
+        """Fetch all questions from question_bank collection by topic and subject (async).
+        
+        Args:
+            subject: Subject to filter by
+            topic: Topic to filter by
+            
+        Returns:
+            Tuple of (questions_info, status_code)
+        """
+        try:
+            # Validate required parameters
+            if not subject or not topic:
+                return {"message": "Both subject and topic are required"}, 400
+
+            def _fetch_questions_sync():
+                return self.question_repository.get_questions_by_topic_subject(
+                    subject=subject,
+                    topic=topic
+                )
+
+            # Run the database operation in a thread pool
+            loop = asyncio.get_event_loop()
+            questions = await loop.run_in_executor(self.thread_pool, _fetch_questions_sync)
+
+            # Prepare response
+            response_data = {
+                "questions": questions,
+                "total_count": len(questions),
+                "subject": subject,
+                "topic": topic
+            }
+
+            return response_data, 200
+            
+        except Exception as e:
+            error_message = f"Error fetching questions: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500
+
+    async def update_question_document(self, question_data: Dict) -> Tuple[Dict, int]:
+        """Update an entire document in the question_bank collection (async).
+        
+        Args:
+            question_data: Complete question document with _id field
+            
+        Returns:
+            Tuple of (update_result, status_code)
+        """
+        try:
+            # Validate that question_data is provided
+            if not question_data:
+                return {
+                    "success": False,
+                    "message": "question_data is required"
+                }, 400
+
+            # Validate that _id is present
+            if "_id" not in question_data:
+                return {
+                    "success": False,
+                    "message": "question_data must contain an '_id' field"
+                }, 400
+
+            # Process base64 images and replace with URLs
+            try:
+                processed_question_data = await self._process_question_images_async(question_data)
+            except ValueError as img_error:
+                return {
+                    "success": False,
+                    "message": str(img_error)
+                }, 400
+
+            def _update_question_sync():
+                return self.question_repository.update_question_document(processed_question_data)
+
+            # Run the database operation in a thread pool
+            loop = asyncio.get_event_loop()
+            success, message, updated_at = await loop.run_in_executor(self.thread_pool, _update_question_sync)
+
+            if success:
+                response_data = {
+                    "success": True,
+                    "message": message,
+                    "document_id": str(processed_question_data["_id"])
+                }
+                # Add updated_at to response if available
+                if updated_at:
+                    response_data["updated_at"] = updated_at.isoformat()
+                
+                return response_data, 200
+            else:
+                return {
+                    "success": False,
+                    "message": message
+                }, 400
+            
+        except Exception as e:
+            error_message = f"Error updating question document: {str(e)}"
+            print(error_message)
+            return {
+                "success": False,
+                "message": error_message
+            }, 500 

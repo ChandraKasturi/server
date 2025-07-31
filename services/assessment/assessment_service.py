@@ -991,6 +991,11 @@ class AssessmentService:
                 "score_percentage": score_percentage
             }
             
+            # Check if the assessment has a pdf_id and add it to the result
+            if "pdf_id" in assessment and assessment["pdf_id"]:
+                assessment_result["pdf_id"] = assessment["pdf_id"]
+                print(f"Added pdf_id to assessment result: {assessment['pdf_id']}")
+            
             # Update assessment with results and update questions with student answers
             print(f"Assessment questions before update: {assessment_questions}")
             self.history_repo.update_assessment(
@@ -1343,10 +1348,10 @@ class AssessmentService:
             [
               {{
                 "question": "The question text",
-                "option1": "Option A",
-                "option2": "Option B",
-                "option3": "Option C",
-                "option4": "Option D",
+                "option1": "option 1",
+                "option2": "option 2",
+                "option3": "option 3",
+                "option4": "option 4",
                 "correctanswer": "The letter of the correct option (A, B, C, or D)",
                 "explanation": "Explanation of the correct answer",
                 "question_type": "MCQ"
@@ -1711,4 +1716,23 @@ class AssessmentService:
                     filtered_q[field] = q[field]
             filtered_questions.append(filtered_q)
             
-        return filtered_questions 
+        return filtered_questions
+
+    def get_learning_streak(self, student_id: str, subject: str = None, count_ai_messages: bool = False) -> Tuple[Dict, int]:
+        """Get learning streak information for a student.
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional subject to filter by (if None, counts all subjects)
+            count_ai_messages: If True, counts both user and AI messages; if False, only user messages
+            
+        Returns:
+            Tuple of (streak_info, status_code)
+        """
+        try:
+            streak_info = self.history_repo.get_learning_streak(student_id, subject, count_ai_messages)
+            return streak_info, 200
+        except Exception as e:
+            error_message = f"Error getting learning streak: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500 
