@@ -310,6 +310,7 @@ class ProfileUpdateResponse(BaseModel):
 
 class ProfileImageUpdateResponse(BaseModel):
     """Response from update_profile_image service"""
+    Message: str
     image_url: str
 
 # CHAT RESPONSES (matching JSONResponse content)
