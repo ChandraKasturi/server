@@ -96,8 +96,13 @@ class Settings(BaseSettings):
     @property
     def default_profile_image_path(self) -> str:
         """Gets the full path to the default profile image."""
-        return os.path.join(SERVER_DIR, self.DEFAULT_PROFILE_IMAGE_FILENAME)
-
+        return os.path.join(self.static_image_path, self.DEFAULT_PROFILE_IMAGE_FILENAME)
+    
+    @property
+    def default_profile_image_relative_path(self) -> str:
+        """Gets the relative path to the default profile image from /static."""
+        # Returns path relative to /static directory
+        return f"/{self.STATIC_DIR}/{self.STATIC_IMAGE_DIR}/{self.DEFAULT_PROFILE_IMAGE_FILENAME}"
     @property
     def static_dir_path(self) -> str:
         """Gets the full path to the static directory."""

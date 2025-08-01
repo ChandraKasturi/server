@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, Request, File, UploadFile
 from fastapi.responses import JSONResponse, FileResponse
 
@@ -5,6 +6,7 @@ from models.u_models import ProfileUmodel, ProfileGetResponse, ProfileUpdateResp
 from services.profile.profile_service import ProfileService
 from routers.auth import auth_middleware
 from utils.json_response import UGJSONResponse
+from config import settings
 
 router = APIRouter(tags=["Profile"])
 
@@ -53,7 +55,7 @@ async def update_profile_image(student_id: str = Depends(auth_middleware), file:
     """
     result, status_code = await profile_service.update_profile_image(student_id, file)
     
-    return UGJSONResponse(content=result, status_code=status_code)
+    return JSONResponse(content={"image_url": result}, status_code=status_code)
 
 @router.get("/getprofileimage", response_class=FileResponse)
 def get_profile_image(student_id: str = Depends(auth_middleware)):
@@ -65,6 +67,8 @@ def get_profile_image(student_id: str = Depends(auth_middleware)):
     Returns:
         File response with profile image
     """
-    image_path, status_code = profile_service.get_profile_image_path(student_id)
+    relative_image_path, status_code = profile_service.get_profile_image_path(student_id)
     
-    return FileResponse(image_path) 
+    # Convert relative path to full file system path
+    
+    return UGJSONResponse(content={"image_url": relative_image_path}, status_code=status_code) 

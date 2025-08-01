@@ -64,13 +64,13 @@ class ProfileService:
             return {"Message": "Something went wrong"}, 500
     
     def get_profile_image_path(self, student_id: str) -> Tuple[str, int]:
-        """Get the path to a user's profile image.
+        """Get the relative path to a user's profile image from /static.
         
         Args:
             student_id: ID of the student
             
         Returns:
-            Tuple of (image_path, status_code)
+            Tuple of (relative_image_path, status_code)
         """
         try:
             static_dir = settings.static_dir_path
@@ -87,12 +87,13 @@ class ProfileService:
             for ext in ['.jpg', '.jpeg', '.png', '.gif']:
                 img_path = os.path.join(images_dir, f"{student_id}{ext}")
                 if os.path.exists(img_path):
-                    return img_path, 200
+                    # Return relative path from /static
+                    return f"/{settings.STATIC_DIR}/{settings.STATIC_IMAGE_DIR}/{student_id}{ext}", 200
             
-            # If no image found, return default
-            return settings.default_profile_image_path, 200
+            # If no image found, return default relative path
+            return settings.default_profile_image_relative_path, 200
         except Exception:
-            return settings.default_profile_image_path, 200
+            return settings.default_profile_image_relative_path, 200
     
     async def update_profile_image(self, student_id: str, file: UploadFile) -> Tuple[Dict, int]:
         """Update a user's profile image.
@@ -142,10 +143,10 @@ class ProfileService:
                 with open(image_path, "wb") as f:
                     f.write(contents)
                 
-                # Generate URL (using URL generation approach from the original code)
-                image_url = f"{settings.STATIC_ASSET_BASE_URL}{student_id}{ext}"
+                # Generate relative path from /static
+                image_path = f"/{settings.STATIC_DIR}/{settings.STATIC_IMAGE_DIR}/{student_id}{ext}"
                 
-                return {"Message": "Image Uploaded Successfully", "image_url": image_url}, 200
+                return {"Message": "Image Uploaded Successfully", "image_path": image_path}, 200
             except Exception:
                 return {"Message": "Invalid image file"}, 400
         except Exception:
