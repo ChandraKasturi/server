@@ -336,6 +336,7 @@ class AssessmentService:
             You are an expert educator. Generate {num_questions} multiple-choice questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
             level {level} (where 1 is easiest and 5 is hardest).
+            You must generate exactly {num_questions} questions.
             
             For each question:
             1. Create a challenging but fair question
@@ -365,7 +366,7 @@ class AssessmentService:
             You are an expert educator. Generate {num_questions} very short answer questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
             level {level} (where 1 is easiest and 5 is hardest).
-            
+            You must generate exactly {num_questions} questions.
             For each question:
             1. Create questions that require very brief answers (1-3 words, definitions, terms)
             2. Focus on key terminology, concepts, or factual recall
@@ -392,7 +393,7 @@ class AssessmentService:
             You are an expert educator. Generate {num_questions} short answer questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
             level {level} (where 1 is easiest and 5 is hardest).
-            
+            You must generate exactly {num_questions} questions.
             For each question:
             1. Create questions that require brief explanations (1-3 sentences)
             2. Focus on understanding, brief reasoning, or concise explanations
@@ -419,7 +420,7 @@ class AssessmentService:
             You are an expert educator. Generate {num_questions} long answer questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
             level {level} (where 1 is easiest and 5 is hardest).
-            
+            You must generate exactly {num_questions} questions.
             For each question:
             1. Create questions that require detailed explanations and analysis (multiple paragraphs)
             2. Focus on deep understanding, critical thinking, and comprehensive responses
@@ -446,7 +447,7 @@ class AssessmentService:
             You are an expert educator. Generate {num_questions} case study questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
             level {level} (where 1 is easiest and 5 is hardest).
-            
+            You must generate exactly {num_questions} questions.
             For each question:
             1. Create realistic scenarios that require application of knowledge
             2. Present a situation/problem that needs analysis and solution
@@ -473,7 +474,7 @@ class AssessmentService:
             You are an expert educator. Generate {num_questions} fill-in-the-blank questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
             level {level} (where 1 is easiest and 5 is hardest).
-            
+            You must generate exactly {num_questions} questions.
             For each question:
             1. Create a sentence or paragraph with key terms removed and replaced with blanks
             2. Provide the correct answers for each blank
@@ -497,7 +498,7 @@ class AssessmentService:
             You are an expert educator. Generate {num_questions} true/false questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
             level {level} (where 1 is easiest and 5 is hardest).
-            
+            You must generate exactly {num_questions} questions.
             For each question:
             1. Create a challenging but clear statement that is either true or false
             2. Indicate whether the statement is true or false
@@ -523,7 +524,7 @@ class AssessmentService:
             You are an expert educator. Generate {num_questions} multiple-choice questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
             level {level} (where 1 is easiest and 5 is hardest).
-            
+            You must generate exactly {num_questions} questions.
             For each question:
             1. Create a challenging but fair question
             2. Provide four options (A, B, C, D)
@@ -1333,13 +1334,13 @@ class AssessmentService:
         if question_type == "MCQ":
             prompt_template = """
             You are an expert educator. Generate {num_questions} multiple-choice questions based on the following text from the document titled "{pdf_title}".
-            
+            You must generate exactly {num_questions} questions.
             Text content:
             {content}
             
             For each question:
             1. Create a challenging but fair question
-            2. Provide four options (A, B, C, D)
+            2. Provide four options (option1, option2, option3, option4)
             3. Indicate the correct answer
             4. Include a brief explanation of why the answer is correct
             
@@ -1352,7 +1353,7 @@ class AssessmentService:
                 "option2": "option 2",
                 "option3": "option 3",
                 "option4": "option 4",
-                "correctanswer": "The letter of the correct option (A, B, C, or D)",
+                "correctanswer": "correct option (option1, option2, option3, or option4)",
                 "explanation": "Explanation of the correct answer",
                 "question_type": "MCQ"
               }},
@@ -1364,7 +1365,7 @@ class AssessmentService:
         elif question_type == "VERY_SHORT_ANSWER":
             prompt_template = """
             You are an expert educator. Generate {num_questions} very short answer questions based on the following text from the document titled "{pdf_title}".
-            
+            You must generate exactly {num_questions} questions.
             Text content:
             {content}
             
@@ -1380,6 +1381,7 @@ class AssessmentService:
                 "question": "The question text (e.g., 'What is...?', 'Define...', 'Name the...')",
                 "model_answer": "Expected very short answer (1-3 words)",
                 "grading_criteria": "Full marks for exact/equivalent term, partial marks for close answers, zero for incorrect",
+                "explanation": "Explaination of the expected answer",
                 "question_type": "VERY_SHORT_ANSWER",
                 "expected_length": "1-3 words"
               }},
@@ -1391,7 +1393,7 @@ class AssessmentService:
         elif question_type == "SHORT_ANSWER":
             prompt_template = """
             You are an expert educator. Generate {num_questions} short answer questions based on the following text from the document titled "{pdf_title}".
-            
+            You must generate exactly {num_questions} questions.
             Text content:
             {content}
             
@@ -1407,6 +1409,7 @@ class AssessmentService:
                 "question": "The question text",
                 "model_answer": "Brief but complete answer (1-3 sentences)",
                 "grading_criteria": "Key points breakdown: main concept (X marks), supporting detail (Y marks), clarity (Z marks)",
+                "explanation": "explanation about the question and key concepts tested",
                 "question_type": "SHORT_ANSWER",
                 "expected_length": "1-3 sentences"
               }},
@@ -1418,7 +1421,7 @@ class AssessmentService:
         elif question_type == "LONG_ANSWER":
             prompt_template = """
             You are an expert educator. Generate {num_questions} long answer questions based on the following text from the document titled "{pdf_title}".
-            
+            You must generate exactly {num_questions} questions.
             Text content:
             {content}
             
@@ -1434,6 +1437,7 @@ class AssessmentService:
                 "question": "The question text",
                 "model_answer": "Comprehensive detailed answer with multiple key points and examples",
                 "grading_criteria": "Detailed breakdown: concept understanding (X marks), examples/evidence (Y marks), analysis/evaluation (Z marks), structure/clarity (W marks)",
+                "explanation": "explanation about the expected answer",
                 "question_type": "LONG_ANSWER",
                 "expected_length": "Multiple paragraphs"
               }},
@@ -1445,7 +1449,7 @@ class AssessmentService:
         elif question_type == "CASE_STUDY":
             prompt_template = """
             You are an expert educator. Generate {num_questions} case study questions based on the following text from the document titled "{pdf_title}".
-            
+            You must generate exactly {num_questions} questions.
             Text content:
             {content}
             
@@ -1461,6 +1465,7 @@ class AssessmentService:
                 "question": "Present a realistic scenario/case based on the text followed by specific questions about analysis, solutions, or applications",
                 "model_answer": "Comprehensive case analysis with problem identification, theoretical application, and practical solutions",
                 "grading_criteria": "Case analysis (X marks), theoretical application (Y marks), practical solutions (Z marks), justification (W marks)",
+                "explanation": "Overview of the case scenario and key learning objectives",
                 "question_type": "CASE_STUDY",
                 "scenario_type": "Application-based problem solving"
               }},
@@ -1472,7 +1477,7 @@ class AssessmentService:
         elif question_type == "FILL_BLANKS":
             prompt_template = """
             You are an expert educator. Generate {num_questions} fill-in-the-blank questions based on the following text from the document titled "{pdf_title}".
-            
+            You must generate exactly {num_questions} questions.
             Text content:
             {content}
             
@@ -1497,7 +1502,7 @@ class AssessmentService:
         elif question_type == "TRUEFALSE":
             prompt_template = """
             You are an expert educator. Generate {num_questions} true/false questions based on the following text from the document titled "{pdf_title}".
-            
+            You must generate exactly {num_questions} questions.
             Text content:
             {content}
             
@@ -1524,7 +1529,7 @@ class AssessmentService:
             question_type = "MCQ"
             prompt_template = """
             You are an expert educator. Generate {num_questions} multiple-choice questions based on the following text from the document titled "{pdf_title}".
-            
+            You must generate exactly {num_questions} questions.
             Text content:
             {content}
             
