@@ -146,7 +146,7 @@ class ProfileService:
                 # Generate relative path from /static
                 image_path = f"/{settings.STATIC_DIR}/{settings.STATIC_IMAGE_DIR}/{student_id}{ext}"
                 
-                return {"Message": "Image Uploaded Successfully", "image_path": image_path}, 200
+                return {"Message": "Image Uploaded Successfully", "image_url": image_path}, 200
             except Exception:
                 return {"Message": "Invalid image file"}, 400
         except Exception:

@@ -55,7 +55,7 @@ async def update_profile_image(student_id: str = Depends(auth_middleware), file:
     """
     result, status_code = await profile_service.update_profile_image(student_id, file)
     
-    return JSONResponse(content={"image_url": result}, status_code=status_code)
+    return JSONResponse(content=result, status_code=status_code)
 
 @router.get("/getprofileimage", response_class=FileResponse)
 def get_profile_image(student_id: str = Depends(auth_middleware)):
