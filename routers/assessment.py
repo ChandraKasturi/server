@@ -385,7 +385,8 @@ def get_subject_history(
 def get_history_dates(
     request: Request,
     student_id: str = Depends(auth_middleware),
-    date: str = None
+    date: str = None,
+    subject: str = None
 ):
     """Get available dates where messages exist in history.
     
@@ -393,7 +394,8 @@ def get_history_dates(
         request: FastAPI request object
         student_id: ID of the student (from auth middleware)
         date: Date to search from in ISO format (YYYY-MM-DD). If not provided, uses current date.
-        
+        subject: Subject to filter history by (science, social_science, mathematics, english, hindi). 
+                If None, returns dates from all subjects.
     Returns:
         JSON response with list of available dates (up to 5 most recent)
     """
@@ -416,7 +418,8 @@ def get_history_dates(
         available_dates = history_repository.get_available_dates(
             student_id=student_id,
             from_date=search_date,
-            limit=5
+            limit=5,
+            subject=subject
         )
         
         return UGJSONResponse(
