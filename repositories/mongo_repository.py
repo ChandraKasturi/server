@@ -337,25 +337,35 @@ class HistoryRepository(MongoRepository):
                    .skip(skip)
                    .limit(page_size))
     
-    def get_available_dates(self, student_id: str, from_date: datetime, limit: int = 5) -> List[str]:
+    def get_available_dates(self, student_id: str, from_date: datetime, limit: int = 5, subject: str = None) -> List[str]:
         """Get available dates where messages exist, starting from a given date.
         
         Args:
             student_id: ID of the student
             from_date: Date to start searching from (inclusive)
             limit: Maximum number of dates to return (default: 5)
-            
+            subject: Subject to filter history by (science, social_science, mathematics, english, hindi). 
+                    If None, returns dates from all subjects.
         Returns:
             List of date strings in YYYY-MM-DD format, sorted by most recent first
         """
         collection = self.get_collection(student_id, "sahasra_history")
         
+        # Build match query
+        match_query = {
+            "time": {"$lte": from_date}  # Messages on or before the given date
+        }
+        
+        # Add subject filter if provided
+        if subject and subject.lower() != "all":
+            # Normalize subject name (replace hyphens with underscores)
+            normalized_subject = subject.replace("-", "_").lower()
+            match_query["subject"] = {"$regex": f"^{normalized_subject}$", "$options": "i"}  # Case-insensitive exact match
+        
         # Create aggregation pipeline to get unique dates
         pipeline = [
             {
-                "$match": {
-                    "time": {"$lte": from_date}  # Messages on or before the given date
-                }
+                "$match": match_query
             },
             {
                 "$addFields": {
