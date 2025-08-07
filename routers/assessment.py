@@ -8,7 +8,7 @@ from models.u_models import (
     AssessmentGenerationResponse, AssessmentSubmissionResponse, AssessmentListResponse,
     AssessmentByIdResponse, FeedbackResponse, ProgressResponse, SubjectProgress,
     AssessmentSubmissionsListResponse, AssessmentPDFListResponse, SubjectHistoryResponse,
-    AssessmentHistoryItem, AssessmentSubmissionItem, HistoryDatesResponse, HistoryDatesData
+    AssessmentHistoryItem, AssessmentHistoryItemFiltered, AssessmentSubmissionItem, HistoryDatesResponse, HistoryDatesData
 )
 from services.assessment.assessment_service import AssessmentService
 from routers.auth import auth_middleware
@@ -95,7 +95,7 @@ def generate_pdf_assessment(
     
     return UGJSONResponse(content=result, status_code=status_code)
 
-@router.get("/assessments", response_model=List[AssessmentHistoryItem])
+@router.get("/assessments", response_model=List[AssessmentHistoryItemFiltered])
 def get_assessments(request: Request, student_id: str = Depends(auth_middleware), time: str = None, subject: str = None, topic: str = None):
     """Get all assessments for a student.
     
@@ -107,7 +107,7 @@ def get_assessments(request: Request, student_id: str = Depends(auth_middleware)
         topic: Optional topic filter to find assessments containing this topic
         
     Returns:
-        JSON response with list of assessments
+        JSON response with list of filtered assessments (only essential fields)
     """
     assessments, status_code = assessment_service.get_assessments(student_id, time, subject, topic)
     

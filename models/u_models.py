@@ -249,6 +249,12 @@ class AssessmentLastSubmission(BaseModel):
     total_questions: int
     score_percentage: float
 
+class AssessmentLastSubmissionFiltered(BaseModel):
+    """Filtered last submission data for get_assessments response"""
+    correct_count: int
+    total_questions: int
+    score_percentage: float
+
 class AssessmentHistoryItem(BaseModel):
     """Individual assessment from get_assessments"""
     id: MongoObjectId = Field(alias="_id")
@@ -265,6 +271,20 @@ class AssessmentHistoryItem(BaseModel):
     last_submission: Optional[AssessmentLastSubmission] = None
     last_submission_time: Optional[datetime] = None
     submission_count: Optional[int] = None
+
+class AssessmentHistoryItemFiltered(BaseModel):
+    """Filtered individual assessment from get_assessments - returns only essential fields"""
+    id: MongoObjectId = Field(alias="_id")
+    subject: Optional[str] = None
+    topics: List[str]
+    level: Optional[int] = None
+    created_at: Optional[datetime] = None
+    # Additional fields needed for backward compatibility
+    pdf_id: Optional[str] = None
+    title: Optional[str] = None
+    question_type: Optional[str] = None
+    last_submission: Optional[AssessmentLastSubmissionFiltered] = None
+    last_submission_time: Optional[datetime] = None
 
 class AssessmentListResponse(BaseModel):
     """Response from get_assessments service - returns List[AssessmentHistoryItem]"""
@@ -312,6 +332,56 @@ class ProfileImageUpdateResponse(BaseModel):
     """Response from update_profile_image service"""
     Message: str
     image_url: str
+
+# Mobile Verification Models
+class MobileUpdateRequest(BaseModel):
+    """Request model for mobile number update"""
+    new_mobile: str
+
+class MobileVerificationRequest(BaseModel):
+    """Request model for mobile verification with OTP"""
+    otp_token: str
+
+class MobileUpdateResponse(BaseModel):
+    """Response from mobile update request"""
+    Message: str
+
+class MobileVerificationResponse(BaseModel):
+    """Response from mobile verification"""
+    Message: str
+    new_mobile: Optional[str] = None
+
+class PendingMobileVerificationResponse(BaseModel):
+    """Response for pending mobile verification status"""
+    has_pending_verification: bool
+    old_mobile: Optional[str] = None
+    new_mobile: Optional[str] = None
+    requested_at: Optional[datetime] = None
+
+# Email Verification Models
+class EmailUpdateRequest(BaseModel):
+    """Request model for email address update"""
+    new_email: str
+
+class EmailVerificationRequest(BaseModel):
+    """Request model for email verification with OTP"""
+    otp_token: str
+
+class EmailUpdateResponse(BaseModel):
+    """Response from email update request"""
+    Message: str
+
+class EmailVerificationResponse(BaseModel):
+    """Response from email verification"""
+    Message: str
+    new_email: Optional[str] = None
+
+class PendingEmailVerificationResponse(BaseModel):
+    """Response for pending email verification status"""
+    has_pending_verification: bool
+    old_email: Optional[str] = None
+    new_email: Optional[str] = None
+    requested_at: Optional[datetime] = None
 
 # CHAT RESPONSES (matching JSONResponse content)
 class TweetResponse(BaseModel):

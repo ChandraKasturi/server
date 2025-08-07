@@ -232,4 +232,228 @@ class AuthService:
             
             return "Password Updated Successfully You May Login Now", 200
         except Exception:
-            return "Something Went Wrong", 400 
+            return "Something Went Wrong", 400
+    
+    def initiate_mobile_verification(self, student_id: str, old_mobile: str, new_mobile: str) -> Tuple[str, int]:
+        """Start the mobile number verification process.
+        
+        Args:
+            student_id: ID of the student requesting mobile change
+            old_mobile: Current mobile number
+            new_mobile: New mobile number to verify
+            
+        Returns:
+            Tuple of (message, status_code)
+        """
+        if not isinstance(new_mobile, str) or not new_mobile.strip():
+            return "New mobile number is required", 400
+            
+        # Validate mobile number format (basic validation)
+        if not self.phone_regex.match(new_mobile.replace('+', '').replace('-', '').replace(' ', '')):
+            return "Invalid mobile number format", 400
+            
+        # Check if new mobile is already taken by another user
+        existing_user = self.user_repo.find_by_email_or_mobile(new_mobile)
+        if existing_user and existing_user.get("student_id") != student_id:
+            return "Mobile number already registered to another account", 400
+            
+        # Check if there's already a pending verification for this user
+        if self.token_repo.has_pending_mobile_verification(student_id):
+            return "Mobile verification already in progress. Please complete or wait for it to expire.", 400
+            
+        # Generate OTP
+        token = ''.join([secrets.choice(string.digits) for _ in range(6)])
+        
+        # Store mobile verification token
+        success = self.token_repo.store_mobile_verification_token(student_id, old_mobile, new_mobile, token)
+        
+        if not success:
+            return "Failed to initiate mobile verification", 500
+            
+        # Send OTP to new mobile number
+        try:
+            self.notification_service.send_mobile_verification_otp_sms(new_mobile, token)
+            return "OTP sent to your new mobile number. Please verify to complete the change.", 200
+        except Exception:
+            # Clean up token if SMS sending fails
+            self.token_repo.delete_mobile_verification_token(student_id)
+            return "Failed to send OTP. Please try again.", 500
+    
+    def verify_mobile_change(self, student_id: str, token: str) -> Tuple[str, Optional[str], int]:
+        """Verify mobile number change with OTP.
+        
+        Args:
+            student_id: ID of the student
+            token: OTP token to verify
+            
+        Returns:
+            Tuple of (message, new_mobile_number, status_code)
+        """
+        if not token or not token.strip():
+            return "Verification token is required", None, 400
+            
+        # Get verification token data
+        token_data = self.token_repo.get_mobile_verification_token_data(student_id, token)
+        
+        if not token_data:
+            return "Invalid or expired verification token", None, 400
+            
+        if token_data.get("token") != token:
+            return "Invalid verification token", None, 400
+            
+        new_mobile = token_data.get("new_mobile")
+        
+        # Double-check that the new mobile isn't taken by another user
+        existing_user = self.user_repo.find_by_email_or_mobile(new_mobile)
+        if existing_user and existing_user.get("student_id") != student_id:
+            # Clean up token
+            self.token_repo.delete_mobile_verification_token(student_id)
+            return "Mobile number already registered to another account", None, 400
+            
+        try:
+            # Update user's mobile number
+            update_success = self.user_repo.update_user(student_id, {"phonenumber": new_mobile})
+            
+            if update_success:
+                # Clean up verification token
+                self.token_repo.delete_mobile_verification_token(student_id)
+                return "Mobile number updated successfully", new_mobile, 200
+            else:
+                return "Failed to update mobile number", None, 500
+        except Exception:
+            return "Something went wrong while updating mobile number", None, 500
+    
+    def get_pending_mobile_verification(self, student_id: str) -> Optional[Dict]:
+        """Get pending mobile verification details for a student.
+        
+        Args:
+            student_id: ID of the student
+            
+        Returns:
+            Dictionary with old_mobile and new_mobile if pending, None otherwise
+        """
+        token_data = self.token_repo.mobile_verification_tokens_collection.find_one(
+            {"student_id": student_id},
+            {"old_mobile": 1, "new_mobile": 1, "created_at": 1}
+        )
+        
+        if token_data:
+            return {
+                "old_mobile": token_data.get("old_mobile"),
+                "new_mobile": token_data.get("new_mobile"),
+                "requested_at": token_data.get("created_at")
+            }
+        return None
+    
+    def initiate_email_verification(self, student_id: str, old_email: str, new_email: str) -> Tuple[str, int]:
+        """Start the email address verification process.
+        
+        Args:
+            student_id: ID of the student requesting email change
+            old_email: Current email address
+            new_email: New email address to verify
+            
+        Returns:
+            Tuple of (message, status_code)
+        """
+        if not isinstance(new_email, str) or not new_email.strip():
+            return "New email address is required", 400
+            
+        # Basic email validation
+        import re
+        email_regex = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+        if not email_regex.match(new_email):
+            return "Invalid email address format", 400
+            
+        # Check if new email is already taken by another user
+        existing_user = self.user_repo.find_by_email_or_mobile(new_email)
+        if existing_user and existing_user.get("student_id") != student_id:
+            return "Email address already registered to another account", 400
+            
+        # Check if there's already a pending verification for this user
+        if self.token_repo.has_pending_email_verification(student_id):
+            return "Email verification already in progress. Please complete or wait for it to expire.", 400
+            
+        # Generate OTP
+        token = ''.join([secrets.choice(string.digits) for _ in range(6)])
+        
+        # Store email verification token
+        success = self.token_repo.store_email_verification_token(student_id, old_email, new_email, token)
+        
+        if not success:
+            return "Failed to initiate email verification", 500
+            
+        # Send OTP to new email address
+        try:
+            self.notification_service.send_email_verification_email(old_email, new_email, token)
+            return "Verification email sent to your new email address. Please check your inbox and enter the OTP to complete the change.", 200
+        except Exception:
+            # Clean up token if email sending fails
+            self.token_repo.delete_email_verification_token(student_id)
+            return "Failed to send verification email. Please try again.", 500
+    
+    def verify_email_change(self, student_id: str, token: str) -> Tuple[str, Optional[str], int]:
+        """Verify email address change with OTP.
+        
+        Args:
+            student_id: ID of the student
+            token: OTP token to verify
+            
+        Returns:
+            Tuple of (message, new_email_address, status_code)
+        """
+        if not token or not token.strip():
+            return "Verification token is required", None, 400
+            
+        # Get verification token data
+        token_data = self.token_repo.get_email_verification_token_data(student_id, token)
+        
+        if not token_data:
+            return "Invalid or expired verification token", None, 400
+            
+        if token_data.get("token") != token:
+            return "Invalid verification token", None, 400
+            
+        new_email = token_data.get("new_email")
+        
+        # Double-check that the new email isn't taken by another user
+        existing_user = self.user_repo.find_by_email_or_mobile(new_email)
+        if existing_user and existing_user.get("student_id") != student_id:
+            # Clean up token
+            self.token_repo.delete_email_verification_token(student_id)
+            return "Email address already registered to another account", None, 400
+            
+        try:
+            # Update user's email address
+            update_success = self.user_repo.update_user(student_id, {"email": new_email})
+            
+            if update_success:
+                # Clean up verification token
+                self.token_repo.delete_email_verification_token(student_id)
+                return "Email address updated successfully", new_email, 200
+            else:
+                return "Failed to update email address", None, 500
+        except Exception:
+            return "Something went wrong while updating email address", None, 500
+    
+    def get_pending_email_verification(self, student_id: str) -> Optional[Dict]:
+        """Get pending email verification details for a student.
+        
+        Args:
+            student_id: ID of the student
+            
+        Returns:
+            Dictionary with old_email and new_email if pending, None otherwise
+        """
+        token_data = self.token_repo.email_verification_tokens_collection.find_one(
+            {"student_id": student_id},
+            {"old_email": 1, "new_email": 1, "created_at": 1}
+        )
+        
+        if token_data:
+            return {
+                "old_email": token_data.get("old_email"),
+                "new_email": token_data.get("new_email"),
+                "requested_at": token_data.get("created_at")
+            }
+        return None 

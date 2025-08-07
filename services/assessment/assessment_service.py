@@ -174,7 +174,7 @@ class AssessmentService:
             assessment = {
                 "questions": db_questions,
                 "student_id": student_id,
-                "timestamp": datetime.utcnow(),
+                "created_at": datetime.utcnow(),
                 "session_id": session_id,
                 "question_types": question_types,
                 "subject": subject,
@@ -1016,7 +1016,13 @@ class AssessmentService:
             return {"Message": f"Error submitting assessment: {str(e)}"}, 500
     
     def get_assessments(self, student_id: str, time_str: Optional[str] = None, subject: Optional[str] = None, topic: Optional[str] = None) -> Tuple[List[Dict], int]:
-        """Get a student's assessments.
+        """Get a student's assessments with filtered response.
+        
+        This method returns only essential fields to reduce payload size:
+        - subject, topics, level, created_at
+        - last_submission: {correct_count, total_questions, score_percentage}
+        - last_submission_time
+        - Additional fields for backward compatibility: pdf_id, title, question_type
         
         Args:
             student_id: ID of the student
@@ -1025,7 +1031,7 @@ class AssessmentService:
             topic: Optional topic to filter assessments
             
         Returns:
-            Tuple of (assessments, status_code)
+            Tuple of (filtered_assessments, status_code)
         """
         try:
             # Parse time if provided
@@ -1043,24 +1049,51 @@ class AssessmentService:
             # Get assessments
             assessments = self.history_repo.get_assessments(student_id, from_date, subject, topic)
             
-            # Ensure each assessment has a 'topics' field
+            # Filter and restructure assessments to include only specific fields
+            filtered_assessments = []
             for assessment in assessments:
-                if 'topics' not in assessment:
-                    if 'topic' in assessment:
-                        assessment['topics'] = [assessment['topic']]
-                    else:
-                        # Try to extract topics from the questions
-                        topics = set()
-                        for question in assessment.get('questions', []):
-                            if 'topic' in question:
-                                topics.add(question['topic'])
-                        
-                        if topics:
-                            assessment['topics'] = list(topics)
-                        else:
-                            assessment['topics'] = []
+                # Ensure 'topics' field exists
+                topics = []
+                if 'topics' in assessment:
+                    topics = assessment['topics']
+                elif 'topic' in assessment:
+                    topics = [assessment['topic']]
+                else:
+                    # Try to extract topics from the questions
+                    topics_set = set()
+                    for question in assessment.get('questions', []):
+                        if 'topic' in question:
+                            topics_set.add(question['topic'])
+                    topics = list(topics_set)
+                
+                # Create filtered assessment with only required fields
+                filtered_assessment = {
+                    '_id': assessment.get('_id'),
+                    'subject': assessment.get('subject'),
+                    'topics': topics,
+                    'level': assessment.get('level'),
+                    'created_at': assessment.get('created_at'),
+                    # Additional fields needed for other endpoints
+                    'pdf_id': assessment.get('pdf_id'),
+                    'title': assessment.get('title'),
+                }
+                
+                # Add last_submission fields if they exist
+                if 'last_submission' in assessment:
+                    last_submission = assessment['last_submission']
+                    filtered_assessment['last_submission'] = {
+                        'correct_count': last_submission.get('correct_count'),
+                        'total_questions': last_submission.get('total_questions'),
+                        'score_percentage': last_submission.get('score_percentage')
+                    }
+                
+                # Add last_submission_time if it exists
+                if 'last_submission_time' in assessment:
+                    filtered_assessment['last_submission_time'] = assessment['last_submission_time']
+                
+                filtered_assessments.append(filtered_assessment)
             
-            return assessments, 200
+            return filtered_assessments, 200
         except Exception as e:
             return [], 500
     

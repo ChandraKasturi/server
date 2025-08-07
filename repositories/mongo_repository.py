@@ -118,6 +118,14 @@ class TokenRepository(MongoRepository):
             settings.MONGO_DATABASE_TOKENS, 
             settings.MONGO_COLLECTION_PASSWORD_TOKENS
         )
+        self.mobile_verification_tokens_collection = self.get_collection(
+            settings.MONGO_DATABASE_TOKENS, 
+            settings.MONGO_COLLECTION_MOBILE_VERIFICATION_TOKENS
+        )
+        self.email_verification_tokens_collection = self.get_collection(
+            settings.MONGO_DATABASE_TOKENS, 
+            settings.MONGO_COLLECTION_EMAIL_VERIFICATION_TOKENS
+        )
         
         # Ensure indexes for token expiration
         self.auth_tokens_collection.create_index(
@@ -131,6 +139,14 @@ class TokenRepository(MongoRepository):
         self.password_tokens_collection.create_index(
             "ExpiresAt", 
             expireAfterSeconds=settings.PASSWORD_TOKEN_EXPIRE_SECONDS
+        )
+        self.mobile_verification_tokens_collection.create_index(
+            "ExpiresAt", 
+            expireAfterSeconds=settings.MOBILE_VERIFICATION_TOKEN_EXPIRE_SECONDS
+        )
+        self.email_verification_tokens_collection.create_index(
+            "ExpiresAt", 
+            expireAfterSeconds=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_SECONDS
         )
     
     def store_auth_token(self, student_id: str, token: str) -> bool:
@@ -174,6 +190,132 @@ class TokenRepository(MongoRepository):
     def get_password_token_data(self, token: str) -> Optional[Dict]:
         """Get password reset data by token."""
         return self.password_tokens_collection.find_one({"token": token})
+    
+    def store_mobile_verification_token(self, student_id: str, old_mobile: str, new_mobile: str, token: str) -> bool:
+        """Store a mobile verification token.
+        
+        Args:
+            student_id: ID of the student requesting mobile change
+            old_mobile: Current mobile number
+            new_mobile: New mobile number to be verified
+            token: OTP token
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        # Remove any existing mobile verification token for this student
+        self.mobile_verification_tokens_collection.delete_many({"student_id": student_id})
+        
+        result = self.mobile_verification_tokens_collection.insert_one({
+            "student_id": student_id,
+            "old_mobile": old_mobile,
+            "new_mobile": new_mobile,
+            "token": token,
+            "created_at": datetime.utcnow(),
+            "ExpiresAt": datetime.utcnow()
+        })
+        return result.acknowledged
+    
+    def get_mobile_verification_token_data(self, student_id: str, token: str) -> Optional[Dict]:
+        """Get mobile verification data by student ID and token.
+        
+        Args:
+            student_id: ID of the student
+            token: OTP token to verify
+            
+        Returns:
+            Token data if found and valid, None otherwise
+        """
+        return self.mobile_verification_tokens_collection.find_one({
+            "student_id": student_id,
+            "token": token
+        })
+    
+    def delete_mobile_verification_token(self, student_id: str) -> bool:
+        """Delete mobile verification token for a student.
+        
+        Args:
+            student_id: ID of the student
+            
+        Returns:
+            True if deleted, False otherwise
+        """
+        result = self.mobile_verification_tokens_collection.delete_many({"student_id": student_id})
+        return result.deleted_count > 0
+    
+    def has_pending_mobile_verification(self, student_id: str) -> bool:
+        """Check if student has pending mobile verification.
+        
+        Args:
+            student_id: ID of the student
+            
+        Returns:
+            True if pending verification exists, False otherwise
+        """
+        return self.mobile_verification_tokens_collection.find_one({"student_id": student_id}) is not None
+    
+    def store_email_verification_token(self, student_id: str, old_email: str, new_email: str, token: str) -> bool:
+        """Store an email verification token.
+        
+        Args:
+            student_id: ID of the student requesting email change
+            old_email: Current email address
+            new_email: New email address to be verified
+            token: OTP token
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        # Remove any existing email verification token for this student
+        self.email_verification_tokens_collection.delete_many({"student_id": student_id})
+        
+        result = self.email_verification_tokens_collection.insert_one({
+            "student_id": student_id,
+            "old_email": old_email,
+            "new_email": new_email,
+            "token": token,
+            "created_at": datetime.utcnow(),
+            "ExpiresAt": datetime.utcnow()
+        })
+        return result.acknowledged
+    
+    def get_email_verification_token_data(self, student_id: str, token: str) -> Optional[Dict]:
+        """Get email verification data by student ID and token.
+        
+        Args:
+            student_id: ID of the student
+            token: OTP token to verify
+            
+        Returns:
+            Token data if found and valid, None otherwise
+        """
+        return self.email_verification_tokens_collection.find_one({
+            "student_id": student_id,
+            "token": token
+        })
+    
+    def delete_email_verification_token(self, student_id: str) -> bool:
+        """Delete email verification token for a student.
+        
+        Args:
+            student_id: ID of the student
+            
+        Returns:
+            True if deleted, False otherwise
+        """
+        result = self.email_verification_tokens_collection.delete_many({"student_id": student_id})
+        return result.deleted_count > 0
+    
+    def has_pending_email_verification(self, student_id: str) -> bool:
+        """Check if student has pending email verification.
+        
+        Args:
+            student_id: ID of the student
+            
+        Returns:
+            True if pending verification exists, False otherwise
+        """
+        return self.email_verification_tokens_collection.find_one({"student_id": student_id}) is not None
 
 class QuestionRepository(MongoRepository):
     """Repository for question bank operations."""
@@ -491,7 +633,6 @@ class HistoryRepository(MongoRepository):
             assessment_data["created_at"] = datetime.utcnow()
             
         # For backward compatibility, also include date field
-        assessment_data["date"] = assessment_data.get("created_at")
             
         collection = self.get_collection(student_id, "sahasra_assessments")
         result = collection.insert_one(assessment_data)

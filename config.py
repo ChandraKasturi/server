@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     MONGO_COLLECTION_AUTH_TOKENS: str = "auth_tokens"
     MONGO_COLLECTION_REGISTER_TOKENS: str = "register_tokens"
     MONGO_COLLECTION_PASSWORD_TOKENS: str = "password_tokens"
+    MONGO_COLLECTION_MOBILE_VERIFICATION_TOKENS: str = "mobile_verification_tokens"
+    MONGO_COLLECTION_EMAIL_VERIFICATION_TOKENS: str = "email_verification_tokens"
     MONGO_DATABASE_USERS: str = "sahasra_users"
     MONGO_COLLECTION_USERS: str = "users"
     MONGO_DATABASE_QUESTIONS: str = "sahasra_questions"
@@ -30,6 +32,8 @@ class Settings(BaseSettings):
     AUTH_TOKEN_EXPIRE_SECONDS: int = 7200
     REGISTER_TOKEN_EXPIRE_SECONDS: int = 600 # Matches controller logic (10*60)
     PASSWORD_TOKEN_EXPIRE_SECONDS: int = 600 # Matches controller logic (10*60)
+    MOBILE_VERIFICATION_TOKEN_EXPIRE_SECONDS: int = 600 # 10 minutes for mobile verification
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_SECONDS: int = 600 # 10 minutes for email verification
 
     # OpenAI
     OPENAI_API_KEY: str
@@ -63,6 +67,7 @@ class Settings(BaseSettings):
     ADWINGSSMS_SENDER_ID: str
     ADWINGSSMS_TEMPLATE_REGISTER: str
     ADWINGSSMS_TEMPLATE_PASSWORD: str
+    ADWINGSSMS_TEMPLATE_MOBILE_VERIFICATION: str
 
     # Redis (for queue management and caching)
     REDIS_URL: str
@@ -81,6 +86,7 @@ class Settings(BaseSettings):
     DEFAULT_PROFILE_IMAGE_FILENAME: str = "defaultug.png" # Filename of default image
     EMAIL_TEMPLATE_FORGOT_PASSWORD: str = "forgotpasswordU.html"
     EMAIL_TEMPLATE_REGISTER: str = "emailU.html"
+    EMAIL_TEMPLATE_EMAIL_VERIFICATION: str = "emailVerificationU.html"
     EMAIL_TEMPLATE_DIR: str = SERVER_DIR # Directory containing email templates
 
     # CORS
@@ -122,6 +128,11 @@ class Settings(BaseSettings):
     def register_template_path(self) -> str:
         """Gets the full path to the registration email template."""
         return os.path.join(self.EMAIL_TEMPLATE_DIR, self.EMAIL_TEMPLATE_REGISTER)
+
+    @property
+    def email_verification_template_path(self) -> str:
+        """Gets the full path to the email verification template."""
+        return os.path.join(self.EMAIL_TEMPLATE_DIR, self.EMAIL_TEMPLATE_EMAIL_VERIFICATION)
 
     @property
     def GEMINI_API_KEY(self) -> str:
