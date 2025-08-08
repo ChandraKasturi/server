@@ -108,7 +108,9 @@ class AssessmentService:
                     
                     topic_questions = self.question_repo.find_questions(
                         query=query,
-                        limit=topic_question_count
+                        limit=topic_question_count,
+                        subject=subject,
+                        topic=topic_name
                     )
                     db_questions.extend(topic_questions)
                 else:
@@ -145,7 +147,9 @@ class AssessmentService:
                             
                             type_questions = self.question_repo.find_questions(
                                 query=query,
-                                limit=count
+                                limit=count,
+                                subject=subject,
+                                topic=topic_name
                             )
                             
                             db_questions.extend(type_questions)

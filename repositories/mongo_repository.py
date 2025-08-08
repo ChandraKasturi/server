@@ -322,6 +322,7 @@ class QuestionRepository(MongoRepository):
     
     def __init__(self, mongo_uri: str = None):
         super().__init__(mongo_uri)
+        # Keep the old collection for backward compatibility
         self.questions_collection = self.get_collection(
             settings.MONGO_DATABASE_QUESTIONS, 
             settings.MONGO_COLLECTION_QUESTION_BANK
@@ -331,14 +332,43 @@ class QuestionRepository(MongoRepository):
             settings.MONGO_COLLECTION_TOPIC_SUBTOPIC
         )
     
+    def _get_subject_topic_collection(self, subject: str, topic: str):
+        """Get collection for specific subject and topic using pattern x_{subject_name}_{topic_name}."""
+        # Normalize subject and topic names (lowercase, replace spaces/hyphens with underscores)
+        normalized_subject = subject.lower().replace(" ", "_").replace("-", "_")
+        normalized_topic = topic.lower().replace(" ", "_").replace("-", "_")
+        
+        collection_name = f"x_{normalized_subject}_{normalized_topic}"
+        return self.get_collection(settings.MONGO_DATABASE_QUESTIONS, collection_name)
+    
     def insert_question(self, question_data: Dict) -> bool:
         """Insert a new question."""
-        result = self.questions_collection.insert_one(question_data)
+        # If subject and topic are available, use the new collection pattern
+        if "subject" in question_data and "topic" in question_data:
+            collection = self._get_subject_topic_collection(
+                question_data["subject"], 
+                question_data["topic"]
+            )
+        else:
+            # Fall back to the default collection for backward compatibility
+            collection = self.questions_collection
+            
+        result = collection.insert_one(question_data)
         return result.acknowledged
     
-    def find_questions(self, query: Dict, limit: int = 0) -> List[Dict]:
+    def find_questions(self, query: Dict, limit: int = 0, subject: str = None, topic: str = None) -> List[Dict]:
         """Find questions based on query criteria."""
-        return list(self.questions_collection.find(query).limit(limit))
+        # If subject and topic are provided, use the new collection pattern
+        if subject and topic:
+            collection = self._get_subject_topic_collection(subject, topic)
+            # Remove subject and topic from query since they're implicit in the collection
+            filtered_query = query
+        else:
+            # Use the default collection and include subject/topic in query if present
+            collection = self.questions_collection
+            filtered_query = query
+            
+        return list(collection.find(filtered_query).limit(limit))
     
     def get_all_topics_subtopics(self) -> List[Dict]:
         """Get all subject topics and subtopics."""
@@ -354,18 +384,26 @@ class QuestionRepository(MongoRepository):
         Returns:
             List of all question dictionaries matching the criteria
         """
-        query = {}
-        
-        # Add subject filter if provided
-        if subject:
-            query["subject"] = {"$regex": f"^{subject}$", "$options": "i"}  # Case-insensitive exact match
+        # Use the new collection pattern for better performance
+        if subject and topic:
+            collection = self._get_subject_topic_collection(subject, topic)
+            # No need to filter by subject/topic since they're implicit in the collection
+            query = {}
+        else:
+            # Fall back to the old method for backward compatibility
+            collection = self.questions_collection
+            query = {}
             
-        # Add topic filter if provided
-        if topic:
-            query["topic"] = {"$regex": f"^{topic}$", "$options": "i"}  # Case-insensitive exact match
+            # Add subject filter if provided
+            if subject:
+                query["subject"] = {"$regex": f"^{subject}$", "$options": "i"}  # Case-insensitive exact match
+                
+            # Add topic filter if provided
+            if topic:
+                query["topic"] = {"$regex": f"^{topic}$", "$options": "i"}  # Case-insensitive exact match
         
         # Convert ObjectId to string for easier handling in API responses
-        questions = list(self.questions_collection.find(query))
+        questions = list(collection.find(query))
         for question in questions:
             if "_id" in question:
                 question["_id"] = str(question["_id"])
@@ -404,8 +442,18 @@ class QuestionRepository(MongoRepository):
             updated_at = datetime.now(kolkata_tz)
             update_data["updated_at"] = updated_at
             
+            # Determine which collection to use
+            if "subject" in question_data and "topic" in question_data:
+                collection = self._get_subject_topic_collection(
+                    question_data["subject"], 
+                    question_data["topic"]
+                )
+            else:
+                # Fall back to the default collection
+                collection = self.questions_collection
+            
             # Perform the update
-            result = self.questions_collection.update_one(
+            result = collection.update_one(
                 {"_id": document_id},
                 {"$set": update_data},
                 upsert=False  # Don't create if doesn't exist
