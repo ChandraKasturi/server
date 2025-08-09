@@ -67,7 +67,7 @@ class HierarchicalWebDirectoryProcessor:
         self.gemini_client = genai.Client(api_key=self.gemini_api_key)
         
         # Initialize MongoDB
-        self.mongo_uri = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
+        self.mongo_uri = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
         self.mongo_client = MongoClient(self.mongo_uri)
         self.db = self.mongo_client['x_cbse']
         
