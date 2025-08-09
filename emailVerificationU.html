@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sahasra AI - Email Verification OTP</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .otp {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        .email-info {
+            background-color: #e8f4fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+            border-left: 4px solid #007bff;
+        }
+        .warning {
+            background-color: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 15px 0;
+            border-left: 4px solid #ffc107;
+            font-size: 14px;
+        }
+        .footer {
+            font-size: 12px;
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <img src="https://www.sahasra.ai/sahasra_logo_latest.svg" alt="Sahasra AI Logo" width="200">
+        </div>
+        <h1>Email Verification Required</h1>
+        <p>Hello!</p>
+        <p>We received a request to update your email address in your Sahasra AI account. To ensure the security of your account, please verify your new email address.</p>
+        
+        <div class="email-info">
+            <strong>Email Change Details:</strong><br>
+            Current Email: {{old_email}}<br>
+            New Email: {{new_email}}
+        </div>
+        
+        <p>Please use the following One-Time Password (OTP) to verify your new email address:</p>
+        <div class="otp">{{token}}</div>
+        
+        <div class="warning">
+            <strong>⚠️ Important:</strong> This OTP is valid for 10 minutes only. If you did not request this email change, please ignore this email and contact our support team immediately.
+        </div>
+        
+        <p>To complete the email update process:</p>
+        <ol>
+            <li>Return to the Sahasra AI app</li>
+            <li>Enter the OTP code shown above</li>
+            <li>Your email address will be updated successfully</li>
+        </ol>
+        
+        <p>If you have any questions or need assistance, please don't hesitate to reach out to our support team.</p>
+        
+        <div class="footer">
+            <p>This is an automated message. Please do not reply to this email.</p>
+            <p>For support, contact: <a href="mailto:support@sahasra.ai">support@sahasra.ai</a></p>
+            <p>Helpline: +91 9686978345</p>
+            <p>&copy; 2024 Sahasra AI. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>

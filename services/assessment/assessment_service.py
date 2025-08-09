@@ -339,7 +339,7 @@ class AssessmentService:
             prompt_template = """
             You are an expert educator. Generate {num_questions} multiple-choice questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 5 is hardest).
+            level {level} (where 1 is easiest and 3 is hardest).
             You must generate exactly {num_questions} questions.
             
             For each question:
@@ -369,7 +369,7 @@ class AssessmentService:
             prompt_template = """
             You are an expert educator. Generate {num_questions} very short answer questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 5 is hardest).
+            level {level} (where 1 is easiest and 3 is hardest).
             You must generate exactly {num_questions} questions.
             For each question:
             1. Create questions that require very brief answers (1-3 words, definitions, terms)
@@ -396,7 +396,7 @@ class AssessmentService:
             prompt_template = """
             You are an expert educator. Generate {num_questions} short answer questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 5 is hardest).
+            level {level} (where 1 is easiest and 3 is hardest).
             You must generate exactly {num_questions} questions.
             For each question:
             1. Create questions that require brief explanations (1-3 sentences)
@@ -423,7 +423,7 @@ class AssessmentService:
             prompt_template = """
             You are an expert educator. Generate {num_questions} long answer questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 5 is hardest).
+            level {level} (where 1 is easiest and 3 is hardest).
             You must generate exactly {num_questions} questions.
             For each question:
             1. Create questions that require detailed explanations and analysis (multiple paragraphs)
@@ -450,7 +450,7 @@ class AssessmentService:
             prompt_template = """
             You are an expert educator. Generate {num_questions} case study questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 5 is hardest).
+            level {level} (where 1 is easiest and 3 is hardest).
             You must generate exactly {num_questions} questions.
             For each question:
             1. Create realistic scenarios that require application of knowledge
@@ -477,7 +477,7 @@ class AssessmentService:
             prompt_template = """
             You are an expert educator. Generate {num_questions} fill-in-the-blank questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 5 is hardest).
+            level {level} (where 1 is easiest and 3 is hardest).
             You must generate exactly {num_questions} questions.
             For each question:
             1. Create a sentence or paragraph with key terms removed and replaced with blanks
@@ -501,7 +501,7 @@ class AssessmentService:
             prompt_template = """
             You are an expert educator. Generate {num_questions} true/false questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 5 is hardest).
+            level {level} (where 1 is easiest and 3 is hardest).
             You must generate exactly {num_questions} questions.
             For each question:
             1. Create a challenging but clear statement that is either true or false
@@ -527,7 +527,7 @@ class AssessmentService:
             prompt_template = """
             You are an expert educator. Generate {num_questions} multiple-choice questions about {subject}, specifically on the 
             topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 5 is hardest).
+            level {level} (where 1 is easiest and 3 is hardest).
             You must generate exactly {num_questions} questions.
             For each question:
             1. Create a challenging but fair question
