@@ -389,6 +389,10 @@ class QuestionRepository(MongoRepository):
             collection = self._get_subject_topic_collection(subject, topic)
             # No need to filter by subject/topic since they're implicit in the collection
             query = {}
+            if subject:
+                query["subject"] = {"$regex": f"^{subject}$", "$options": "i"}  # Case-insensitive exact match
+            if topic:
+                query["topic"] = {"$regex": f"^{topic}$", "$options": "i"}  # Case-insensitive exact match
         else:
             # Fall back to the old method for backward compatibility
             collection = self.questions_collection

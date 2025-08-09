@@ -91,7 +91,7 @@ class AssessmentService:
             for topic_name, topic_question_count in questions_per_topic.items():
                 # Find matching questions for this topic
                 base_query = {
-                    "subject": subject,
+                    "subject": f"x_{subject}" if not subject.startswith("x_") else subject,
                     "topic": topic_name,
                 }
                 
