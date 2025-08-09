@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"ExpiresAt":{"$numberInt":"1"}},"name":"ExpiresAt_1","expireAfterSeconds":{"$numberInt":"600"}}],"uuid":"46679c5b152649ec94d584ed15bc02fb","collectionName":"email_verification_tokens","type":"collection"}
