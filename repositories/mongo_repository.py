@@ -338,7 +338,7 @@ class QuestionRepository(MongoRepository):
         normalized_subject = subject.lower().replace(" ", "_").replace("-", "_")
         normalized_topic = topic.lower().replace(" ", "_").replace("-", "_")
         
-        collection_name = f"x_{normalized_subject}_{normalized_topic}"
+        collection_name = f"x_{normalized_subject}_{normalized_topic}" if not normalized_subject.startswith("x_") else f"{normalized_subject}_{normalized_topic}"
         return self.get_collection(settings.MONGO_DATABASE_QUESTIONS, collection_name)
     
     def insert_question(self, question_data: Dict) -> bool:
