@@ -337,7 +337,8 @@ class QuestionRepository(MongoRepository):
         # Normalize subject and topic names (lowercase, replace spaces/hyphens with underscores)
         normalized_subject = subject.lower().replace(" ", "_").replace("-", "_")
         normalized_topic = topic.lower().replace(" ", "_").replace("-", "_")
-        
+        print(f"Normalized subject: {normalized_subject}")
+        print(f"Normalized topic: {normalized_topic}")
         collection_name = f"x_{normalized_subject}_{normalized_topic}" if not normalized_subject.startswith("x_") else f"{normalized_subject}_{normalized_topic}"
         return self.get_collection(settings.MONGO_DATABASE_QUESTIONS, collection_name)
     
@@ -409,6 +410,7 @@ class QuestionRepository(MongoRepository):
         # Convert ObjectId to string for easier handling in API responses
         print(f"Query: {query}")
         print(f"Collection: {collection.name}")
+        print(f"Database: {collection.database.name}")
         questions = list(collection.find(query))
         for question in questions:
             if "_id" in question:
