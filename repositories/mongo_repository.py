@@ -407,6 +407,8 @@ class QuestionRepository(MongoRepository):
                 query["topic"] = {"$regex": f"^{topic}$", "$options": "i"}  # Case-insensitive exact match
         
         # Convert ObjectId to string for easier handling in API responses
+        print(f"Query: {query}")
+        print(f"Collection: {collection.name}")
         questions = list(collection.find(query))
         for question in questions:
             if "_id" in question:
