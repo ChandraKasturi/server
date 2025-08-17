@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, Request, Header, Query
+from fastapi import APIRouter, Depends, Request, Header, Query, UploadFile, File, Form
 from fastapi.responses import JSONResponse, StreamingResponse
 from typing import Optional
 from datetime import datetime, timedelta
 
-from models.pdf_models import SubjectLearnRequest, TTSRequest
+from models.pdf_models import (SubjectLearnRequest, TTSRequest, LearningPDFUploadRequest, 
+                              LearningPDFUploadResponse, LearningPDFProcessingStatus)
 from models.u_models import (LearnAnswerResponse, TTSVoicesResponse, LearningInfoResponse, 
                            FetchQuestionsRequest, FetchQuestionsResponse, 
                            UpdateQuestionRequest, UpdateQuestionResponse)
@@ -42,22 +43,16 @@ async def learn_science(
         question = request_body.question
         include_pdfs = request_body.include_pdfs
         
-        # Use service to get answer
-        answer, status_code = await learning_service.learn_science(
+        # Use service to get answer (now returns structured response with images)
+        response_data, status_code = await learning_service.learn_science(
             question=question,
             student_id=user_id,
             session_id=x_auth_session,
             include_pdfs=include_pdfs
         )
         
-        if status_code != 200:
-            return UGJSONResponse(
-                content={"answer": answer},
-                status_code=status_code
-            )
-            
         return UGJSONResponse(
-            content={"answer": answer},
+            content=response_data,
             status_code=status_code
         )
         
@@ -90,22 +85,16 @@ async def learn_social_science(
         question = request_body.question
         include_pdfs = request_body.include_pdfs
         
-        # Use service to get answer
-        answer, status_code = await learning_service.learn_social_science(
+        # Use service to get answer (now returns structured response with images)
+        response_data, status_code = await learning_service.learn_social_science(
             question=question,
             student_id=user_id,
             session_id=x_auth_session,
             include_pdfs=include_pdfs
         )
         
-        if status_code != 200:
-            return UGJSONResponse(
-                content={"answer": answer},
-                status_code=status_code
-            )
-            
         return UGJSONResponse(
-            content={"answer": answer},
+            content=response_data,
             status_code=status_code
         )
         
@@ -138,22 +127,16 @@ async def learn_mathematics(
         question = request_body.question
         include_pdfs = request_body.include_pdfs
         
-        # Use service to get answer
-        answer, status_code = await learning_service.learn_mathematics(
+        # Use service to get answer (now returns structured response with images)
+        response_data, status_code = await learning_service.learn_mathematics(
             question=question,
             student_id=user_id,
             session_id=x_auth_session,
             include_pdfs=include_pdfs
         )
         
-        if status_code != 200:
-            return UGJSONResponse(
-                content={"answer": answer},
-                status_code=status_code
-            )
-            
         return UGJSONResponse(
-            content={"answer": answer},
+            content=response_data,
             status_code=status_code
         )
         
@@ -186,22 +169,16 @@ async def learn_english(
         question = request_body.question
         include_pdfs = request_body.include_pdfs
         
-        # Use service to get answer
-        answer, status_code = await learning_service.learn_english(
+        # Use service to get answer (now returns structured response with images)
+        response_data, status_code = await learning_service.learn_english(
             question=question,
             student_id=user_id,
             session_id=x_auth_session,
             include_pdfs=include_pdfs
         )
         
-        if status_code != 200:
-            return UGJSONResponse(
-                content={"answer": answer},
-                status_code=status_code
-            )
-            
         return UGJSONResponse(
-            content={"answer": answer},
+            content=response_data,
             status_code=status_code
         )
         
@@ -234,22 +211,16 @@ async def learn_hindi(
         question = request_body.question
         include_pdfs = request_body.include_pdfs
         
-        # Use service to get answer
-        answer, status_code = await learning_service.learn_hindi(
+        # Use service to get answer (now returns structured response with images)
+        response_data, status_code = await learning_service.learn_hindi(
             question=question,
             student_id=user_id,
             session_id=x_auth_session,
             include_pdfs=include_pdfs
         )
         
-        if status_code != 200:
-            return UGJSONResponse(
-                content={"answer": answer},
-                status_code=status_code
-            )
-            
         return UGJSONResponse(
-            content={"answer": answer},
+            content=response_data,
             status_code=status_code
         )
         
@@ -258,62 +229,6 @@ async def learn_hindi(
             content={"answer": f"Error learning Hindi: {str(e)}"},
             status_code=500
         )
-
-# Generic endpoint for any subject
-@router.post("/{subject}", response_model=LearnAnswerResponse)
-async def learn_subject(
-    subject: str,
-    request_body: SubjectLearnRequest,
-    request: Request,
-    x_auth_session: Optional[str] = Header(None),
-    user_id: str = Depends(auth_middleware)
-):
-    """Learn about any subject by asking questions.
-    
-    Args:
-        subject: Subject to learn about (science, social_science, mathematics, english, hindi)
-        request_body: Request containing the question and options
-        request: FastAPI request object
-        x_auth_session: JWT token for authentication
-        user_id: User ID extracted from JWT token
-        
-    Returns:
-        UGJSONResponse with answer to the question
-    """
-    try:
-        # Get question and options from request
-        question = request_body.question
-        include_pdfs = request_body.include_pdfs
-        
-        # Normalize the subject name
-        subject = subject.replace("-", "_").lower()
-        
-        # Use service to get answer
-        answer, status_code = await learning_service.learn_subject(
-            subject=subject,
-            question=question,
-            student_id=user_id,
-            session_id=x_auth_session,
-            include_pdfs=include_pdfs
-        )
-        
-        if status_code != 200:
-            return UGJSONResponse(
-                content={"answer": answer},
-                status_code=status_code
-            )
-            
-        return UGJSONResponse(
-            content={"answer": answer},
-            status_code=status_code
-        )
-        
-    except Exception as e:
-        return UGJSONResponse(
-            content={"answer": f"Error learning {subject}: {str(e)}"},
-            status_code=500
-        )
-
 
 @router.post("/tts/stream")
 async def stream_tts_audio(
@@ -561,4 +476,251 @@ async def update_question_document(
                 "message": f"Error updating question document: {str(e)}"
             },
             status_code=500
-        ) 
+        )
+
+
+@router.post("/test-upload")
+async def test_upload(
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    subject: str = Form(...)
+):
+    """Test endpoint for multipart uploads"""
+    try:
+        # Simple test response
+        return UGJSONResponse(
+            content={
+                "success": True,
+                "message": "Test upload successful",
+                "filename": file.filename,
+                "content_type": file.content_type,
+                "title": title,
+                "subject": subject,
+                "file_size": file.size if file.size else "unknown"
+            },
+            status_code=200
+        )
+    except Exception as e:
+        return UGJSONResponse(
+            content={
+                "success": False,
+                "message": f"Test upload failed: {str(e)}"
+            },
+            status_code=500
+        )
+
+
+@router.post("/upload-pdf-noauth")
+async def upload_learning_pdf_noauth(
+    file: UploadFile = File(...),
+    title: str = Form(...), 
+    subject: str = Form(...),
+    description: Optional[str] = Form(None),
+    topic: Optional[str] = Form(None),
+    grade: Optional[str] = Form(None)
+):
+    """Upload PDF without authentication for testing"""
+    try:
+        # Mock user_id for testing
+        user_id = "test_user_123"
+        
+        # Use the learning service to upload and process the PDF
+        result, status_code = await learning_service.upload_learning_pdf(
+            file=file,
+            user_id=user_id,
+            title=title,
+            subject=subject,
+            description=description,
+            topic=topic,
+            grade=grade
+        )
+        
+        return UGJSONResponse(
+            content=result,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={
+                "success": False,
+                "message": f"Error uploading learning PDF: {str(e)}"
+            },
+            status_code=500
+        )
+
+
+@router.post("/upload-pdf")
+async def upload_learning_pdf(
+    file: UploadFile = File(...),
+    title: str = Form(...), 
+    subject: str = Form(...),
+    description: Optional[str] = Form(None),
+    topic: Optional[str] = Form(None),
+    grade: Optional[str] = Form(None),
+    x_auth_session: Optional[str] = Header(None),
+    user_id: str = Depends(auth_middleware)
+):
+    """Upload and process a PDF for subject-specific learning with image extraction.
+    
+    This endpoint allows students to upload PDF documents that will be processed for learning purposes.
+    The PDF will be:
+    1. Text extracted using Gemini OCR
+    2. Split into chunks and stored in subject-specific vector database
+    3. Images extracted and captions generated using Gemini
+    4. Image captions stored in vector database for retrieval
+    
+    Args:
+        file: PDF file to upload (must be .pdf format)
+        title: Title for the PDF document
+        subject: Subject category (science, social_science, mathematics, english, hindi)
+        description: Optional description of the PDF content
+        topic: Optional topic within the subject
+        grade: Optional grade level for the content
+        x_auth_session: JWT token for authentication
+        user_id: User ID extracted from JWT token
+        
+    Returns:
+        UGJSONResponse with upload and processing results including:
+        - pdf_id: Unique identifier for the uploaded PDF
+        - processing_status: Status of the processing (completed/failed)
+        - chunks_created: Number of text chunks created
+        - images_extracted: Number of images extracted
+        - file_size: Size of the uploaded file
+        - message: Success or error message
+    """
+    try:
+        # Early validation to prevent binary data processing issues
+        if not file:
+            return UGJSONResponse(
+                content={
+                    "success": False,
+                    "message": "No file provided"
+                },
+                status_code=400
+            )
+        
+        # Validate file is actually a PDF by checking content type and filename
+        if not (file.filename and file.filename.lower().endswith('.pdf')):
+            return UGJSONResponse(
+                content={
+                    "success": False,
+                    "message": "File must be a PDF (.pdf extension required)"
+                },
+                status_code=400
+            )
+        
+        # Validate content type if provided
+        if file.content_type and not file.content_type.startswith(('application/pdf', 'application/octet-stream')):
+            return UGJSONResponse(
+                content={
+                    "success": False,
+                    "message": f"Invalid content type: {file.content_type}. Expected application/pdf"
+                },
+                status_code=400
+            )
+        
+        # Validate required fields
+        if not title or not title.strip():
+            return UGJSONResponse(
+                content={
+                    "success": False,
+                    "message": "Title is required and cannot be empty"
+                },
+                status_code=400
+            )
+        
+        if not subject or not subject.strip():
+            return UGJSONResponse(
+                content={
+                    "success": False,
+                    "message": "Subject is required and cannot be empty"
+                },
+                status_code=400
+            )
+        
+        # Validate file size (optional, adjust as needed)
+        if file.size and file.size > 50 * 1024 * 1024:  # 50MB limit
+            return UGJSONResponse(
+                content={
+                    "success": False,
+                    "message": "File size too large. Maximum size is 50MB."
+                },
+                status_code=400
+            )
+        
+        # Use the learning service to upload and process the PDF
+        result, status_code = await learning_service.upload_learning_pdf(
+            file=file,
+            user_id=user_id,
+            title=title,
+            subject=subject,
+            description=description,
+            topic=topic,
+            grade=grade
+        )
+        
+        return UGJSONResponse(
+            content=result,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={
+                "success": False,
+                "message": f"Error uploading learning PDF: {str(e)}"
+            },
+            status_code=500
+        )
+
+
+# Generic endpoint for any subject - MUST BE LAST to avoid catching specific routes
+@router.post("/{subject}", response_model=LearnAnswerResponse)
+async def learn_subject(
+    subject: str,
+    request_body: SubjectLearnRequest,
+    request: Request,
+    x_auth_session: Optional[str] = Header(None),
+    user_id: str = Depends(auth_middleware)
+):
+    """Learn about any subject by asking questions.
+    
+    Args:
+        subject: Subject to learn about (science, social_science, mathematics, english, hindi)
+        request_body: Request containing the question and options
+        request: FastAPI request object
+        x_auth_session: JWT token for authentication
+        user_id: User ID extracted from JWT token
+        
+    Returns:
+        UGJSONResponse with answer to the question
+    """
+    try:
+        # Get question and options from request
+        question = request_body.question
+        include_pdfs = request_body.include_pdfs
+        
+        # Normalize the subject name
+        subject = subject.replace("-", "_").lower()
+        
+        # Use service to get answer (now returns structured response with images)
+        response_data, status_code = await learning_service.learn_subject(
+            subject=subject,
+            question=question,
+            student_id=user_id,
+            session_id=x_auth_session,
+            include_pdfs=include_pdfs,
+            include_images=True
+        )
+        
+        return UGJSONResponse(
+            content=response_data,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"answer": f"Error learning {subject}: {str(e)}"},
+            status_code=500
+        )

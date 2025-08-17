@@ -296,8 +296,15 @@ class AssessmentByIdResponse(BaseModel):
 
 # LEARNING RESPONSES (matching service returns)
 class LearnAnswerResponse(BaseModel):
-    """Response from learning services - returns answer string"""
+    """Enhanced response from learning services with image support"""
     answer: str
+    has_image: bool = False
+    subject: str
+    image_url: Optional[str] = None
+    image_caption: Optional[str] = None
+    image_page: Optional[int] = None
+    image_score: Optional[float] = None
+    image_pdf_id: Optional[str] = None
 
 class TTSVoicesResponse(BaseModel):
     """Response from TTS voices endpoint"""
