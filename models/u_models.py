@@ -295,16 +295,28 @@ class AssessmentByIdResponse(BaseModel):
     assessment: AssessmentHistoryItem
 
 # LEARNING RESPONSES (matching service returns)
+class LearningImageData(BaseModel):
+    """Individual image data for learning responses"""
+    image_url: str
+    caption: str
+    page_number: Optional[int] = None
+    score: Optional[float] = None
+    pdf_id: Optional[str] = None
+    subject: Optional[str] = None
+
 class LearnAnswerResponse(BaseModel):
-    """Enhanced response from learning services with image support"""
+    """Enhanced response from learning services with multiple image support"""
     answer: str
     has_image: bool = False
     subject: str
+    # Backward compatibility fields (use first image if available)
     image_url: Optional[str] = None
     image_caption: Optional[str] = None
     image_page: Optional[int] = None
     image_score: Optional[float] = None
     image_pdf_id: Optional[str] = None
+    # New field for multiple images
+    images: Optional[List[LearningImageData]] = None
 
 class TTSVoicesResponse(BaseModel):
     """Response from TTS voices endpoint"""

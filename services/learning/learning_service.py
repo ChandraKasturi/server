@@ -514,13 +514,14 @@ class LearningService:
             pdf_context = [f"{doc.metadata.get('source', '')}: {doc.page_content}" for doc in pdf_docs]
             
             # STEP 3: Search for relevant learning images (async)
-            relevant_image = None
+            relevant_images = []
             if include_images:
-                relevant_image = await self._find_relevant_learning_image_async(
+                relevant_images = await self._find_relevant_learning_images_async(
                     user_id=student_id,
                     subject=subject, 
                     query=question,
-                    similarity_threshold=0.9
+                    similarity_threshold=0.4,
+                    max_images=3
                 )
             
             # STEP 4: Combine both contexts
@@ -539,18 +540,26 @@ class LearningService:
             # Join all context parts
             context = "\n".join(all_context_parts) if all_context_parts else ""            
             
-            # STEP 5: Create enhanced prompt with subject-specific system message and image reference
+            # STEP 5: Create enhanced prompt with subject-specific system message and image references
             system_prompt = self.SUBJECT_PROMPTS.get(subject, "You are an educational assistant.")
             
             image_context = ""
-            if relevant_image:
-                image_context = f"\n\nADDITIONAL VISUAL CONTEXT: There is a relevant educational image available that shows: {relevant_image['caption']}. You can reference this visual content in your explanation to enhance understanding."
+            if relevant_images:
+                image_context = "\n\nRELEVANT EDUCATIONAL IMAGES:\n"
+                for i, img in enumerate(relevant_images, 1):
+                    full_image_url = f"https://aigenix.in{img['image_url']}"
+                    image_context += f"\nImage {i}: ![{img['caption']}]({full_image_url})\n"
+                    image_context += f"Caption: {img['caption']}\n"
+                    image_context += f"Page: {img.get('page_number', 'Unknown')}\n"
+                
+                image_context += "\nPlease include these relevant images in your response using markdown format with the full URLs provided above. Reference them appropriately to enhance your explanation."
             
             prompt_messages = [
                 ("system", f"{system_prompt}\n\n"
                           "Use the provided context to give accurate answers. "
                           "If your answer includes information from the student's own documents, clearly indicate this. "
-                          "If a relevant image is available, mention it in your explanation and how it relates to the topic. "
+                          "If relevant images are available, include them in your response using markdown format and explain how they relate to the topic. "
+                          "Always use the full image URLs provided in the image context. "
                           "If you're unsure or the answer is not in the context, be honest about it.\n\n"
                           f"Context: {context}{image_context}"),
                 MessagesPlaceholder(variable_name="history"),
@@ -591,18 +600,21 @@ class LearningService:
             # STEP 7: Create structured response
             response = {
                 "answer": answer,
-                "has_image": relevant_image is not None,
+                "has_image": len(relevant_images) > 0,
                 "subject": subject
             }
             
             # Add image information if available
-            if relevant_image:
+            if relevant_images:
+                # For backward compatibility, use the first image for single image fields
+                first_image = relevant_images[0]
                 response.update({
-                    "image_url": relevant_image["image_url"],
-                    "image_caption": relevant_image["caption"],
-                    "image_page": relevant_image.get("page_number"),
-                    "image_score": relevant_image.get("score"),
-                    "image_pdf_id": relevant_image.get("pdf_id")
+                    "image_url": first_image["image_url"],
+                    "image_caption": first_image["caption"],
+                    "image_page": first_image.get("page_number"),
+                    "image_score": first_image.get("score"),
+                    "image_pdf_id": first_image.get("pdf_id"),
+                    "images": relevant_images  # All images for enhanced response
                 })
             
             # STEP 8: Store in sahasra_history for persistence (async)
@@ -618,8 +630,9 @@ class LearningService:
             
             # Store AI response with image info
             ai_response_text = answer
-            if relevant_image:
-                ai_response_text += f" [Image reference: {relevant_image['image_url']}]"
+            if relevant_images:
+                image_refs = ", ".join([img['image_url'] for img in relevant_images])
+                ai_response_text += f" [Image references: {image_refs}]"
             
             ai_history_data = {
                 "subject": subject,
@@ -638,7 +651,8 @@ class LearningService:
             return {
                 "answer": error_message,
                 "has_image": False,
-                "subject": subject
+                "subject": subject,
+                "images": []
             }, 500
     
     # Subject-specific convenience methods (now async)
@@ -1782,37 +1796,41 @@ class LearningService:
             print(f"Error storing learning image captions in vector database: {str(e)}")
             return 0
 
-    async def _find_relevant_learning_image_async(self, user_id: str, subject: str, query: str, similarity_threshold: float = 0.4) -> Optional[Dict]:
-        """Find relevant images from learning PDFs for a query (async).
+    async def _find_relevant_learning_images_async(self, user_id: str, subject: str, query: str, similarity_threshold: float = 0.4, max_images: int = 3) -> List[Dict]:
+        """Find multiple relevant images from learning PDFs for a query (async).
         
         Args:
             user_id: ID of the user
             subject: Subject category
             query: Query to search for
-            similarity_threshold: Minimum similarity score required
+            similarity_threshold: Maximum similarity score threshold (lower is more similar)
+            max_images: Maximum number of images to return
             
         Returns:
-            Dictionary with image information if found, None otherwise
+            List of dictionaries with image information
         """
-        def _find_image_sync():
-            return self._find_relevant_learning_image(user_id, subject, query, similarity_threshold)
+        def _find_images_sync():
+            return self._find_relevant_learning_images(user_id, subject, query, similarity_threshold, max_images)
         
         # Run the synchronous operation in a thread pool
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(self.thread_pool, _find_image_sync)
+        return await loop.run_in_executor(self.thread_pool, _find_images_sync)
 
-    def _find_relevant_learning_image(self, user_id: str, subject: str, query: str, similarity_threshold: float = 0.4) -> Optional[Dict]:
-        """Find relevant images from learning PDFs for a query.
+    def _find_relevant_learning_images(self, user_id: str, subject: str, query: str, similarity_threshold: float = 0.4, max_images: int = 3) -> List[Dict]:
+        """Find multiple relevant images from learning PDFs for a query.
         
         Args:
             user_id: ID of the user
             subject: Subject category
             query: Query to search for
-            similarity_threshold: Minimum similarity score required
+            similarity_threshold: Maximum similarity score threshold (lower is more similar)
+            max_images: Maximum number of images to return
             
         Returns:
-            Dictionary with image information if found, None otherwise
+            List of dictionaries with image information
         """
+        relevant_images = []
+        
         try:
             # Create collection name for learning PDF images
             collection_name = f"learning_{subject}_images_{user_id}"
@@ -1828,21 +1846,21 @@ class LearningService:
                 use_jsonb=True
             )
             
-            # Perform similarity search to find relevant image
+            # Perform similarity search to find relevant images
             results = image_vector_store.similarity_search_with_score(
                 query, 
-                k=5  # Get the most relevant image
+                k=max_images * 2  # Get more results to filter
             )
-            logger.info(f"Learning image results: {results}")
-            if results and len(results) > 0:
-                # Extract image information from the document and metadata
-                doc, score = results[0]
-                logger.info(f"Learning image found: {doc.metadata}")
-                logger.info(f"Learning image score: {score}")
-                # Check if the similarity score meets the threshold
+            
+            logger.info(f"Learning image search results count: {len(results)}")
+            
+            for doc, score in results:
+                logger.info(f"Learning image found with score: {score}, threshold: {similarity_threshold}")
+                
+                # Check if the similarity score meets the threshold (lower score = more similar)
                 if score <= similarity_threshold:
                     if doc.metadata and "image_url" in doc.metadata:
-                        return {
+                        image_info = {
                             "image_url": doc.metadata["image_url"],
                             "caption": doc.page_content,
                             "score": score,
@@ -1850,11 +1868,16 @@ class LearningService:
                             "pdf_id": doc.metadata.get("pdf_id"),
                             "subject": doc.metadata.get("subject")
                         }
+                        relevant_images.append(image_info)
+                        logger.info(f"Added relevant image: {image_info['image_url']}")
+                        
+                        # Stop if we have enough images
+                        if len(relevant_images) >= max_images:
+                            break
                 else:
-                    print(f"Learning image found but similarity score {score} doesn't meet threshold {similarity_threshold}")
-                    return None
+                    logger.info(f"Learning image found but similarity score {score} doesn't meet threshold {similarity_threshold}")
                     
         except Exception as e:
-            print(f"Error finding relevant learning image: {str(e)}")
+            print(f"Error finding relevant learning images: {str(e)}")
             
-        return None 
+        return relevant_images 
