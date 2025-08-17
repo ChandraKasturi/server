@@ -791,7 +791,7 @@ class PDFProcessingService:
             
             # Generate content using Gemini
             response = gemini_client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-pro",
                 contents=[uploaded_file, extraction_prompt]
             )
             
@@ -1080,7 +1080,7 @@ class PDFProcessingService:
                         
                         # Generate caption
                         response = client.models.generate_content(
-                            model="gemini-2.0-flash",
+                            model="gemini-2.5-pro",
                             contents=["Write a concise and accurate caption for this image", pil_image]
                         )
                         

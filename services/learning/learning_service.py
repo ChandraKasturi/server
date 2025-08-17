@@ -2,7 +2,11 @@ import asyncio
 import base64
 import os
 import uuid
-from typing import List, Dict, Any, Optional, Tuple
+import tempfile
+import shutil
+import io
+from loguru import logger
+from typing import List, Dict, Any, Optional, Tuple, BinaryIO
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_postgres.vectorstores import PGVector
@@ -13,8 +17,15 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from datetime import datetime
 import concurrent.futures
+from fastapi import UploadFile
+from google import genai
+from google.genai import types as genai_types
+import fitz  # PyMuPDF
+import PIL.Image
 
 from config import settings
 from repositories.pdf_repository import PDFRepository
@@ -463,8 +474,9 @@ class LearningService:
                     question: str, 
                     student_id: str, 
                     session_id: str = None,
-                    include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about a specific subject (async version).
+                    include_pdfs: bool = True,
+                    include_images: bool = True) -> Tuple[Dict, int]:
+        """Learn about a specific subject with enhanced image support (async version).
         
         Args:
             subject: Subject to learn about (science, social_science, mathematics, english, hindi)
@@ -472,14 +484,18 @@ class LearningService:
             student_id: ID of the student
             session_id: JWT token from X-Auth-Session (optional)
             include_pdfs: Whether to include user's PDFs in the answer
+            include_images: Whether to search for relevant images from learning PDFs
             
         Returns:
-            Tuple of (answer, status_code)
+            Tuple of (response_dict, status_code) containing answer and image information
         """
         try:
             # Validate subject
             if subject not in self.SUBJECT_COLLECTIONS:
-                return f"Invalid subject: {subject}. Valid subjects are: {', '.join(self.SUBJECT_COLLECTIONS.keys())}", 400
+                return {
+                    "answer": f"Invalid subject: {subject}. Valid subjects are: {', '.join(self.SUBJECT_COLLECTIONS.keys())}",
+                    "has_image": False
+                }, 400
             
             # STEP 1: Get relevant documents from the subject knowledge base (async)
             subject_collection = self.SUBJECT_COLLECTIONS[subject]
@@ -487,6 +503,7 @@ class LearningService:
             
             # Extract content from subject knowledge documents
             subject_context = [doc.page_content for doc in subject_docs]
+            logger.info(f"Subject context: {subject_context}")
             
             # STEP 2: Get relevant documents from user's PDFs if requested (async)
             pdf_docs = []
@@ -496,7 +513,17 @@ class LearningService:
             # Extract content from PDF documents with source info
             pdf_context = [f"{doc.metadata.get('source', '')}: {doc.page_content}" for doc in pdf_docs]
             
-            # STEP 3: Combine both contexts
+            # STEP 3: Search for relevant learning images (async)
+            relevant_image = None
+            if include_images:
+                relevant_image = await self._find_relevant_learning_image_async(
+                    user_id=student_id,
+                    subject=subject, 
+                    query=question,
+                    similarity_threshold=0.2
+                )
+            
+            # STEP 4: Combine both contexts
             all_context_parts = []
             
             # Add subject knowledge context if available
@@ -512,15 +539,20 @@ class LearningService:
             # Join all context parts
             context = "\n".join(all_context_parts) if all_context_parts else ""            
             
-            # STEP 4: Create prompt with subject-specific system message and history
+            # STEP 5: Create enhanced prompt with subject-specific system message and image reference
             system_prompt = self.SUBJECT_PROMPTS.get(subject, "You are an educational assistant.")
+            
+            image_context = ""
+            if relevant_image:
+                image_context = f"\n\nADDITIONAL VISUAL CONTEXT: There is a relevant educational image available that shows: {relevant_image['caption']}. You can reference this visual content in your explanation to enhance understanding."
             
             prompt_messages = [
                 ("system", f"{system_prompt}\n\n"
                           "Use the provided context to give accurate answers. "
                           "If your answer includes information from the student's own documents, clearly indicate this. "
+                          "If a relevant image is available, mention it in your explanation and how it relates to the topic. "
                           "If you're unsure or the answer is not in the context, be honest about it.\n\n"
-                          "Context: {context}"),
+                          f"Context: {context}{image_context}"),
                 MessagesPlaceholder(variable_name="history"),
                 ("human", "{question}")
             ]
@@ -528,7 +560,7 @@ class LearningService:
             # Create prompt template
             prompt = ChatPromptTemplate.from_messages(prompt_messages)
             
-            # STEP 5: Create chain with history integration
+            # STEP 6: Create chain with history integration
             chain = prompt | self.ug_llm | StrOutputParser()
             
             # Prepare input for the chain
@@ -556,7 +588,24 @@ class LearningService:
                 chain_input["history"] = []  # Empty history
                 answer = await self._run_chain_without_history_async(chain, chain_input)
             
-            # STEP 6: Store in sahasra_history for persistence (async)
+            # STEP 7: Create structured response
+            response = {
+                "answer": answer,
+                "has_image": relevant_image is not None,
+                "subject": subject
+            }
+            
+            # Add image information if available
+            if relevant_image:
+                response.update({
+                    "image_url": relevant_image["image_url"],
+                    "image_caption": relevant_image["caption"],
+                    "image_page": relevant_image.get("page_number"),
+                    "image_score": relevant_image.get("score"),
+                    "image_pdf_id": relevant_image.get("pdf_id")
+                })
+            
+            # STEP 8: Store in sahasra_history for persistence (async)
             # Store user question
             user_history_data = {
                 "subject": subject,
@@ -567,27 +616,35 @@ class LearningService:
             }
             await self._store_history_async(student_id, user_history_data)
             
-            # Store AI response
+            # Store AI response with image info
+            ai_response_text = answer
+            if relevant_image:
+                ai_response_text += f" [Image reference: {relevant_image['image_url']}]"
+            
             ai_history_data = {
                 "subject": subject,
-                "message": answer,
+                "message": ai_response_text,
                 "is_ai": True,
                 "time": datetime.utcnow(),
                 "session_id": session_id
             }
             await self._store_history_async(student_id, ai_history_data)
             
-            return answer, 200
+            return response, 200
             
         except Exception as e:
             error_message = f"Error learning about {subject}: {str(e)}"
             print(error_message)
-            return error_message, 500
+            return {
+                "answer": error_message,
+                "has_image": False,
+                "subject": subject
+            }, 500
     
     # Subject-specific convenience methods (now async)
     
-    async def learn_science(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about science (async).
+    async def learn_science(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[Dict, int]:
+        """Learn about science with enhanced image support (async).
         
         Args:
             question: Question about science
@@ -596,12 +653,12 @@ class LearningService:
             include_pdfs: Whether to include user's PDFs in the answer
             
         Returns:
-            Tuple of (answer, status_code)
+            Tuple of (response_dict, status_code) containing answer and image information
         """
-        return await self.learn_subject("science", question, student_id, session_id, include_pdfs)
+        return await self.learn_subject("science", question, student_id, session_id, include_pdfs, include_images=True)
     
-    async def learn_social_science(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about social science (async).
+    async def learn_social_science(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[Dict, int]:
+        """Learn about social science with enhanced image support (async).
         
         Args:
             question: Question about social science
@@ -610,12 +667,12 @@ class LearningService:
             include_pdfs: Whether to include user's PDFs in the answer
             
         Returns:
-            Tuple of (answer, status_code)
+            Tuple of (response_dict, status_code) containing answer and image information
         """
-        return await self.learn_subject("social_science", question, student_id, session_id, include_pdfs)
+        return await self.learn_subject("social_science", question, student_id, session_id, include_pdfs, include_images=True)
     
-    async def learn_mathematics(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about mathematics (async).
+    async def learn_mathematics(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[Dict, int]:
+        """Learn about mathematics with enhanced image support (async).
         
         Args:
             question: Question about mathematics
@@ -624,12 +681,12 @@ class LearningService:
             include_pdfs: Whether to include user's PDFs in the answer
             
         Returns:
-            Tuple of (answer, status_code)
+            Tuple of (response_dict, status_code) containing answer and image information
         """
-        return await self.learn_subject("mathematics", question, student_id, session_id, include_pdfs)
+        return await self.learn_subject("mathematics", question, student_id, session_id, include_pdfs, include_images=True)
     
-    async def learn_english(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about English (async).
+    async def learn_english(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[Dict, int]:
+        """Learn about English with enhanced image support (async).
         
         Args:
             question: Question about English
@@ -638,12 +695,12 @@ class LearningService:
             include_pdfs: Whether to include user's PDFs in the answer
             
         Returns:
-            Tuple of (answer, status_code)
+            Tuple of (response_dict, status_code) containing answer and image information
         """
-        return await self.learn_subject("english", question, student_id, session_id, include_pdfs)
+        return await self.learn_subject("english", question, student_id, session_id, include_pdfs, include_images=True)
     
-    async def learn_hindi(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[str, int]:
-        """Learn about Hindi (async).
+    async def learn_hindi(self, question: str, student_id: str, session_id: str = None, include_pdfs: bool = True) -> Tuple[Dict, int]:
+        """Learn about Hindi with enhanced image support (async).
         
         Args:
             question: Question about Hindi
@@ -652,9 +709,9 @@ class LearningService:
             include_pdfs: Whether to include user's PDFs in the answer
             
         Returns:
-            Tuple of (answer, status_code)
+            Tuple of (response_dict, status_code) containing answer and image information
         """
-        return await self.learn_subject("hindi", question, student_id, session_id, include_pdfs)
+        return await self.learn_subject("hindi", question, student_id, session_id, include_pdfs, include_images=True)
 
     async def get_learning_streak(self, student_id: str, subject: str = None, count_ai_messages: bool = False) -> Tuple[Dict, int]:
         """Get learning streak information for a student (async).
@@ -1050,4 +1107,754 @@ class LearningService:
             return {
                 "success": False,
                 "message": error_message
-            }, 500 
+            }, 500
+
+    async def upload_learning_pdf(self, 
+                                  file: UploadFile, 
+                                  user_id: str, 
+                                  title: str,
+                                  subject: str,
+                                  description: Optional[str] = None,
+                                  topic: Optional[str] = None,
+                                  grade: Optional[str] = None) -> Tuple[Dict, int]:
+        """Upload and process a PDF for learning purposes with subject-specific storage.
+        
+        Args:
+            file: Uploaded PDF file
+            user_id: ID of the student
+            title: Title of the PDF document
+            subject: Subject category (must be one of the valid subjects)
+            description: Optional description
+            topic: Optional topic within the subject
+            grade: Optional grade level
+            
+        Returns:
+            Tuple of (response_data, status_code)
+        """
+        try:
+            # Validate subject
+            if subject not in self.SUBJECT_COLLECTIONS:
+                return {
+                    "success": False,
+                    "message": f"Invalid subject: {subject}. Valid subjects are: {', '.join(self.SUBJECT_COLLECTIONS.keys())}"
+                }, 400
+            
+            # Validate file type
+            if not file.filename.lower().endswith('.pdf'):
+                return {
+                    "success": False,
+                    "message": "Uploaded file must be a PDF"
+                }, 400
+            
+            # Generate unique ID for the PDF
+            pdf_id = str(uuid.uuid4())
+            
+            # Save the uploaded file temporarily
+            file_contents = await file.read()
+            
+            # Process the PDF immediately (in-memory processing)
+            result = await self._process_learning_pdf_async(
+                pdf_id=pdf_id,
+                user_id=user_id,
+                title=title,
+                subject=subject,
+                description=description,
+                topic=topic,
+                grade=grade,
+                file_contents=file_contents,
+                filename=file.filename
+            )
+            
+            return result
+            
+        except Exception as e:
+            error_message = f"Error uploading learning PDF: {str(e)}"
+            print(error_message)
+            return {
+                "success": False,
+                "message": error_message
+            }, 500
+
+    async def _process_learning_pdf_async(self,
+                                          pdf_id: str,
+                                          user_id: str,
+                                          title: str,
+                                          subject: str,
+                                          description: Optional[str],
+                                          topic: Optional[str],
+                                          grade: Optional[str],
+                                          file_contents: bytes,
+                                          filename: str) -> Tuple[Dict, int]:
+        """Process a learning PDF by extracting text, creating embeddings, and storing in subject-specific vector store.
+        
+        Args:
+            pdf_id: Unique identifier for the PDF
+            user_id: ID of the student
+            title: Title of the PDF document
+            subject: Subject category
+            description: Optional description
+            topic: Optional topic
+            grade: Optional grade level
+            file_contents: Raw PDF file content
+            filename: Original filename
+            
+        Returns:
+            Tuple of (response_data, status_code)
+        """
+        try:
+            # Create a temporary file for processing
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+                temp_file.write(file_contents)
+                temp_file_path = temp_file.name
+            
+            try:
+                # Extract text from PDF using Gemini OCR (async)
+                chunks, page_count = await self._extract_text_from_pdf_async(temp_file_path)
+                
+                # Extract images from PDF (async)
+                image_data = await self._extract_images_from_learning_pdf_async(temp_file_path, user_id, pdf_id)
+                
+                # Store chunks in subject-specific vector database (async)
+                chunks_created = await self._store_learning_chunks_in_vector_db_async(
+                    pdf_id=pdf_id,
+                    user_id=user_id,
+                    subject=subject,
+                    chunks=chunks,
+                    title=title,
+                    description=description,
+                    topic=topic,
+                    grade=grade
+                )
+                
+                # Store image captions in vector database (async)
+                images_processed = 0
+                if image_data:
+                    images_processed = await self._store_learning_image_captions_async(
+                        pdf_id=pdf_id,
+                        user_id=user_id,
+                        subject=subject,
+                        image_data=image_data
+                    )
+                
+                # Create response
+                response_data = {
+                    "success": True,
+                    "pdf_id": pdf_id,
+                    "title": title,
+                    "subject": subject,
+                    "processing_status": "completed",
+                    "chunks_created": chunks_created,
+                    "images_extracted": len(image_data) if image_data else 0,
+                    "images_processed": images_processed,
+                    "upload_date": datetime.utcnow().isoformat(),
+                    "file_size": len(file_contents),
+                    "page_count": page_count,
+                    "message": f"PDF processed successfully for {subject} learning"
+                }
+                
+                return response_data, 200
+                
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
+                    
+        except Exception as e:
+            error_message = f"Error processing learning PDF: {str(e)}"
+            print(error_message)
+            return {
+                "success": False,
+                "message": error_message
+            }, 500
+
+    async def _extract_text_from_pdf_async(self, pdf_path: str) -> Tuple[List[Dict], int]:
+        """Extract text from PDF using Gemini OCR (async).
+        
+        Args:
+            pdf_path: Path to the PDF file
+            
+        Returns:
+            Tuple of (chunks, page_count)
+        """
+        def _extract_text_sync():
+            return asyncio.run(self._extract_text_from_pdf(pdf_path))
+        
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _extract_text_sync)
+
+    async def _extract_text_from_pdf(self, pdf_path: str) -> Tuple[List[Dict], int]:
+        """Extract text from PDF using Gemini OCR.
+        
+        Args:
+            pdf_path: Path to the PDF file
+            
+        Returns:
+            Tuple of (chunks, page_count)
+        """
+        chunks = []
+        
+        try:
+            # Configure Gemini client
+            gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            
+            # Read PDF file and upload to Gemini
+            with open(pdf_path, 'rb') as file:
+                pdf_content = file.read()
+                pdf_io = io.BytesIO(pdf_content)
+                pdf_io.name = os.path.basename(pdf_path)
+                
+                # Upload PDF using Gemini File API
+                uploaded_file = gemini_client.files.upload(
+                    file=pdf_io,
+                    config=dict(mime_type='application/pdf')
+                )
+            
+            # Create prompt for text extraction with page information
+            extraction_prompt = f"""
+            Extract all text content from this PDF document. 
+            For each page, provide the text content along with the page number.
+            Format your response as follows for each page:
+            
+            PAGE [page_number]:
+            [text content for that page]
+            
+            PAGE [next_page_number]:
+            [text content for that page]
+            
+            Continue this format for all pages in the document.
+            Make sure to preserve the original formatting and structure as much as possible.
+            If a page has no readable text, still include it as "PAGE [page_number]: [No readable text]"
+            """
+            
+            # Generate content using Gemini
+            response = gemini_client.models.generate_content(
+                model="gemini-2.5-pro",
+                contents=[uploaded_file, extraction_prompt]
+            )
+            
+            extracted_text = response.text
+            
+            # Parse the response to create chunks
+            pages = self._parse_gemini_text_response(extracted_text)
+            
+            # Convert to the expected format and create chunks
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=100,
+                length_function=len,
+                separators=["\n\n", "\n", " ", ""]
+            )
+            
+            for page_num, page_text in pages.items():
+                if page_text.strip():  # Only add pages with content
+                    # Split page text into smaller chunks if needed
+                    page_chunks = text_splitter.split_text(page_text.strip())
+                    
+                    for i, chunk_text in enumerate(page_chunks):
+                        chunks.append({
+                            'text': chunk_text,
+                            'page': page_num,
+                            'chunk_index': i,
+                            'metadata': {
+                                'page': page_num,
+                                'chunk_index': i,
+                                'total_pages': len(pages),
+                                'extraction_method': 'gemini_ocr',
+                                'source': 'learning_pdf'
+                            }
+                        })
+            
+            num_pages = len(pages)
+            
+            # Clean up - delete the uploaded file from Gemini
+            try:
+                gemini_client.files.delete(name=uploaded_file.name)
+                print(f"Successfully deleted uploaded file {uploaded_file.name} from Gemini.")
+            except Exception as del_e:
+                print(f"Could not delete uploaded file {uploaded_file.name} from Gemini: {del_e}")
+            
+            return chunks, num_pages
+            
+        except Exception as e:
+            print(f"Error extracting text with Gemini OCR: {str(e)}")
+            # Fallback to pypdf if Gemini fails
+            return await self._extract_text_fallback(pdf_path)
+
+    def _parse_gemini_text_response(self, text_response: str) -> Dict[int, str]:
+        """Parse Gemini's text extraction response to extract page-wise content.
+        
+        Args:
+            text_response: Raw text response from Gemini
+            
+        Returns:
+            Dictionary mapping page numbers to their text content
+        """
+        pages = {}
+        current_page = None
+        current_text = []
+        
+        lines = text_response.split('\n')
+        
+        for line in lines:
+            # Check if line indicates a new page
+            if line.strip().startswith('PAGE ') and ':' in line:
+                # Save previous page if exists
+                if current_page is not None:
+                    pages[current_page] = '\n'.join(current_text)
+                
+                # Extract page number
+                try:
+                    page_part = line.strip().split(':')[0]  # Get "PAGE X" part
+                    page_num_str = page_part.replace('PAGE', '').strip()
+                    current_page = int(page_num_str)
+                    current_text = []
+                    
+                    # Add any text after the colon on the same line
+                    remaining_text = ':'.join(line.strip().split(':')[1:]).strip()
+                    if remaining_text:
+                        current_text.append(remaining_text)
+                        
+                except (ValueError, IndexError):
+                    # If page number parsing fails, treat as regular text
+                    if current_page is not None:
+                        current_text.append(line)
+            else:
+                # Regular text line
+                if current_page is not None:
+                    current_text.append(line)
+                elif not pages:  # If no page marker found yet, assume page 1
+                    current_page = 1
+                    current_text.append(line)
+        
+        # Save the last page
+        if current_page is not None:
+            pages[current_page] = '\n'.join(current_text)
+        
+        # If no pages were found, treat entire response as page 1
+        if not pages:
+            pages[1] = text_response
+        
+        return pages
+
+    async def _extract_text_fallback(self, pdf_path: str) -> Tuple[List[Dict], int]:
+        """Fallback text extraction method using pypdf.
+        
+        Args:
+            pdf_path: Path to the PDF file
+            
+        Returns:
+            Tuple of (chunks, num_pages)
+        """
+        import pypdf
+        chunks = []
+        
+        with open(pdf_path, 'rb') as file:
+            pdf_reader = pypdf.PdfReader(file)
+            num_pages = len(pdf_reader.pages)
+            
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=100,
+                length_function=len,
+                separators=["\n\n", "\n", " ", ""]
+            )
+            
+            for page_num, page in enumerate(pdf_reader.pages, 1):
+                text = page.extract_text()
+                if text.strip():
+                    # Split page text into smaller chunks
+                    page_chunks = text_splitter.split_text(text.strip())
+                    
+                    for i, chunk_text in enumerate(page_chunks):
+                        chunks.append({
+                            'text': chunk_text,
+                            'page': page_num,
+                            'chunk_index': i,
+                            'metadata': {
+                                'page': page_num,
+                                'chunk_index': i,
+                                'total_pages': num_pages,
+                                'extraction_method': 'pypdf_fallback',
+                                'source': 'learning_pdf'
+                            }
+                        })
+        
+        return chunks, num_pages
+
+    async def _extract_images_from_learning_pdf_async(self, pdf_path: str, user_id: str, pdf_id: str) -> List[Dict]:
+        """Extract images from a learning PDF and generate captions (async).
+        
+        Args:
+            pdf_path: Path to the PDF file
+            user_id: ID of the user
+            pdf_id: ID of the PDF document
+            
+        Returns:
+            List of dictionaries with image information
+        """
+        def _extract_images_sync():
+            return asyncio.run(self._extract_images_from_learning_pdf(pdf_path, user_id, pdf_id))
+        
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _extract_images_sync)
+
+    async def _extract_images_from_learning_pdf(self, pdf_path: str, user_id: str, pdf_id: str) -> List[Dict]:
+        """Extract images from a learning PDF and generate captions using Gemini.
+        
+        Args:
+            pdf_path: Path to the PDF file
+            user_id: ID of the user
+            pdf_id: ID of the PDF document
+            
+        Returns:
+            List of dictionaries with image information
+        """
+        image_data = []
+        
+        # Create output folder for images
+        images_folder = os.path.join(settings.static_dir_path, "pdf_images", f"learning_{pdf_id}")
+        os.makedirs(images_folder, exist_ok=True)
+        
+        # Create Gemini client
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        
+        # Open the PDF
+        doc = fitz.open(pdf_path)
+        image_count = 0
+        
+        try:
+            # Loop through all the pages
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                # Get the images on the page
+                image_list = page.get_images(full=True)
+
+                for img in image_list:
+                    xref = img[0]
+                    base_image = doc.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    image_filename = os.path.join(images_folder, f"learning_image_{page_num + 1}_{image_count}.png")
+                    
+                    # Write the image to a file
+                    with open(image_filename, "wb") as img_file:
+                        img_file.write(image_bytes)
+                    
+                    # Generate a URL for the image (relative to static directory)
+                    image_url = f"/static/pdf_images/learning_{pdf_id}/learning_image_{page_num + 1}_{image_count}.png"
+                    
+                    # Generate caption with Gemini API
+                    try:
+                        # Open the image with PIL
+                        pil_image = PIL.Image.open(image_filename)
+                        
+                        # Generate educational caption
+                        response = client.models.generate_content(
+                            model="gemini-2.5-pro",
+                            contents=["Write a detailed educational caption for this image, focusing on what students can learn from it", pil_image]
+                        )
+                        
+                        caption = response.text.strip()
+                    except Exception as e:
+                        caption = f"Educational image from page {page_num + 1}"
+                        print(f"Error generating caption with Gemini: {str(e)}")
+                    
+                    # Store image data
+                    image_data.append({
+                        "image_path": image_filename,
+                        "image_url": image_url,
+                        "page_number": page_num + 1,
+                        "caption": caption,
+                        "image_index": image_count,
+                        "source": "learning_pdf"
+                    })
+                    
+                    image_count += 1
+            
+            print(f"Extracted {image_count} images from learning PDF {pdf_id}")
+            return image_data
+            
+        except Exception as e:
+            print(f"Error extracting images from learning PDF: {str(e)}")
+            return []
+        finally:
+            doc.close()
+
+    async def _store_learning_chunks_in_vector_db_async(self,
+                                                        pdf_id: str,
+                                                        user_id: str,
+                                                        subject: str,
+                                                        chunks: List[Dict],
+                                                        title: str,
+                                                        description: Optional[str] = None,
+                                                        topic: Optional[str] = None,
+                                                        grade: Optional[str] = None) -> int:
+        """Store learning PDF chunks in subject-specific vector database (async).
+        
+        Args:
+            pdf_id: ID of the PDF document
+            user_id: ID of the user
+            subject: Subject category
+            chunks: List of text chunks
+            title: Title of the PDF
+            description: Optional description
+            topic: Optional topic
+            grade: Optional grade level
+            
+        Returns:
+            Number of chunks successfully stored
+        """
+        def _store_chunks_sync():
+            return asyncio.run(self._store_learning_chunks_in_vector_db(
+                pdf_id, user_id, subject, chunks, title, description, topic, grade
+            ))
+        
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _store_chunks_sync)
+
+    async def _store_learning_chunks_in_vector_db(self,
+                                                  pdf_id: str,
+                                                  user_id: str,
+                                                  subject: str,
+                                                  chunks: List[Dict],
+                                                  title: str,
+                                                  description: Optional[str] = None,
+                                                  topic: Optional[str] = None,
+                                                  grade: Optional[str] = None) -> int:
+        """Store learning PDF chunks in subject-specific vector database.
+        
+        Args:
+            pdf_id: ID of the PDF document
+            user_id: ID of the user
+            subject: Subject category
+            chunks: List of text chunks
+            title: Title of the PDF
+            description: Optional description
+            topic: Optional topic
+            grade: Optional grade level
+            
+        Returns:
+            Number of chunks successfully stored
+        """
+        try:
+            # Create subject-specific collection name for learning PDFs
+            collection_name = self.SUBJECT_COLLECTIONS[subject]
+            
+            # Use the main PGVector connection (not student-specific for learning content)
+            connection_string = settings.PGVECTOR_CONNECTION_STRING
+            
+            # Initialize embeddings
+            embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
+            
+            # Use PGVector with subject-specific collection
+            vector_store = PGVector(
+                embeddings=embeddings,
+                collection_name=collection_name,
+                connection=connection_string,
+                use_jsonb=True
+            )
+            
+            # Convert chunks to documents for vector storage
+            documents = []
+            for i, chunk in enumerate(chunks):
+                # Create document with comprehensive metadata
+                doc = Document(
+                    page_content=chunk['text'],
+                    metadata={
+                        'pdf_id': pdf_id,
+                        'user_id': user_id,
+                        'subject': subject,
+                        'topic': topic or '',
+                        'grade': grade or '',
+                        'title': title,
+                        'description': description or '',
+                        'page': chunk.get('page', 0),
+                        'chunk_index': chunk.get('chunk_index', i),
+                        'extraction_method': chunk.get('metadata', {}).get('extraction_method', 'unknown'),
+                        'source': 'learning_pdf',
+                        'upload_date': datetime.utcnow().isoformat()
+                    }
+                )
+                documents.append(doc)
+            
+            # Add documents to vector store
+            if documents:
+                vector_store.add_documents(documents)
+                print(f"Successfully stored {len(documents)} chunks in learning vector database for {subject}")
+                return len(documents)
+            else:
+                return 0
+                
+        except Exception as e:
+            print(f"Error storing learning chunks in vector database: {str(e)}")
+            return 0
+
+    async def _store_learning_image_captions_async(self,
+                                                   pdf_id: str,
+                                                   user_id: str,
+                                                   subject: str,
+                                                   image_data: List[Dict]) -> int:
+        """Store learning PDF image captions in vector database (async).
+        
+        Args:
+            pdf_id: ID of the PDF document
+            user_id: ID of the user
+            subject: Subject category
+            image_data: List of image data with captions
+            
+        Returns:
+            Number of image captions successfully stored
+        """
+        def _store_captions_sync():
+            return asyncio.run(self._store_learning_image_captions(pdf_id, user_id, subject, image_data))
+        
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _store_captions_sync)
+
+    async def _store_learning_image_captions(self,
+                                             pdf_id: str,
+                                             user_id: str,
+                                             subject: str,
+                                             image_data: List[Dict]) -> int:
+        """Store learning PDF image captions in vector database.
+        
+        Args:
+            pdf_id: ID of the PDF document
+            user_id: ID of the user
+            subject: Subject category
+            image_data: List of image data with captions
+            
+        Returns:
+            Number of image captions successfully stored
+        """
+        try:
+            # Create subject-specific collection name for learning PDF images
+            collection_name = f"learning_{subject}_images_{user_id}"
+            
+            # Use the main PGVector connection
+            connection_string = settings.PGVECTOR_CONNECTION_STRING
+            
+            # Initialize embeddings
+            embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
+            
+            # Use PGVector with subject-specific collection
+            vector_store = PGVector(
+                embeddings=embeddings,
+                collection_name=collection_name,
+                connection=connection_string,
+                use_jsonb=True
+            )
+            
+            # Convert image captions to documents for vector storage
+            documents = []
+            for i, img in enumerate(image_data):
+                # Create document with comprehensive metadata
+                doc = Document(
+                    page_content=img["caption"],
+                    metadata={
+                        'pdf_id': pdf_id,
+                        'user_id': user_id,
+                        'subject': subject,
+                        'image_id': f"learning_image_{i}",
+                        'page_number': img.get("page_number"),
+                        'image_url': img["image_url"],
+                        'image_path': img["image_path"],
+                        'image_index': img.get("image_index", i),
+                        'type': 'learning_image_caption',
+                        'source': 'learning_pdf',
+                        'upload_date': datetime.utcnow().isoformat()
+                    }
+                )
+                documents.append(doc)
+            
+            # Add documents to vector store
+            if documents:
+                vector_store.add_documents(documents)
+                print(f"Successfully stored {len(documents)} image captions in learning vector database for {subject}")
+                return len(documents)
+            else:
+                return 0
+                
+        except Exception as e:
+            print(f"Error storing learning image captions in vector database: {str(e)}")
+            return 0
+
+    async def _find_relevant_learning_image_async(self, user_id: str, subject: str, query: str, similarity_threshold: float = 0.4) -> Optional[Dict]:
+        """Find relevant images from learning PDFs for a query (async).
+        
+        Args:
+            user_id: ID of the user
+            subject: Subject category
+            query: Query to search for
+            similarity_threshold: Minimum similarity score required
+            
+        Returns:
+            Dictionary with image information if found, None otherwise
+        """
+        def _find_image_sync():
+            return self._find_relevant_learning_image(user_id, subject, query, similarity_threshold)
+        
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _find_image_sync)
+
+    def _find_relevant_learning_image(self, user_id: str, subject: str, query: str, similarity_threshold: float = 0.4) -> Optional[Dict]:
+        """Find relevant images from learning PDFs for a query.
+        
+        Args:
+            user_id: ID of the user
+            subject: Subject category
+            query: Query to search for
+            similarity_threshold: Minimum similarity score required
+            
+        Returns:
+            Dictionary with image information if found, None otherwise
+        """
+        try:
+            # Create collection name for learning PDF images
+            collection_name = f"learning_{subject}_images_{user_id}"
+            
+            # Use the main PGVector connection
+            connection_string = settings.PGVECTOR_CONNECTION_STRING
+            
+            # Initialize vector store
+            image_vector_store = PGVector(
+                embeddings=self.embeddings,
+                collection_name=collection_name,
+                connection=connection_string,
+                use_jsonb=True
+            )
+            
+            # Perform similarity search to find relevant image
+            results = image_vector_store.similarity_search_with_score(
+                query, 
+                k=5  # Get the most relevant image
+            )
+            logger.info(f"Learning image results: {results}")
+            if results and len(results) > 0:
+                # Extract image information from the document and metadata
+                doc, score = results[0]
+                logger.info(f"Learning image found: {doc.metadata}")
+                logger.info(f"Learning image score: {score}")
+                # Check if the similarity score meets the threshold
+                if score <= similarity_threshold:
+                    if doc.metadata and "image_url" in doc.metadata:
+                        return {
+                            "image_url": doc.metadata["image_url"],
+                            "caption": doc.page_content,
+                            "score": score,
+                            "page_number": doc.metadata.get("page_number"),
+                            "pdf_id": doc.metadata.get("pdf_id"),
+                            "subject": doc.metadata.get("subject")
+                        }
+                else:
+                    print(f"Learning image found but similarity score {score} doesn't meet threshold {similarity_threshold}")
+                    return None
+                    
+        except Exception as e:
+            print(f"Error finding relevant learning image: {str(e)}")
+            
+        return None 

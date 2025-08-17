@@ -298,4 +298,38 @@ class TTSRequest(BaseModel):
     """Model for text-to-speech request."""
     text: str = Field(..., description="Text to convert to speech")
     voice: Optional[str] = Field(default='af_heart', description="Voice to use for TTS")
-    speed: Optional[float] = Field(default=1.0, ge=0.25, le=4.0, description="Speed of speech (0.25 to 4.0)") 
+    speed: Optional[float] = Field(default=1.0, ge=0.25, le=4.0, description="Speed of speech (0.25 to 4.0)")
+
+
+class LearningPDFUploadRequest(BaseModel):
+    """Model for learning-specific PDF upload request."""
+    title: str = Field(..., description="Title of the PDF document")
+    description: Optional[str] = Field(default=None, description="Description of the PDF content")
+    subject: str = Field(..., description="Subject category (science, social_science, mathematics, english, hindi)")
+    topic: Optional[str] = Field(default=None, description="Topic within the subject")
+    grade: Optional[str] = Field(default=None, description="Grade level for the content")
+
+
+class LearningPDFUploadResponse(BaseModel):
+    """Model for learning PDF upload response."""
+    pdf_id: str = Field(..., description="Unique identifier for the uploaded PDF")
+    title: str = Field(..., description="Title of the PDF document")
+    subject: str = Field(..., description="Subject category")
+    processing_status: str = Field(..., description="Current processing status")
+    chunks_created: int = Field(..., description="Number of text chunks created")
+    images_extracted: int = Field(..., description="Number of images extracted")
+    upload_date: str = Field(..., description="Upload timestamp")
+    file_size: int = Field(..., description="Size of the uploaded file in bytes")
+    message: str = Field(..., description="Success or error message")
+
+
+class LearningPDFProcessingStatus(BaseModel):
+    """Model for learning PDF processing status."""
+    pdf_id: str = Field(..., description="PDF document identifier")
+    processing_status: str = Field(..., description="Current processing status")
+    progress_step: Optional[str] = Field(default=None, description="Current processing step")
+    chunks_processed: Optional[int] = Field(default=0, description="Number of chunks processed")
+    images_processed: Optional[int] = Field(default=0, description="Number of images processed")
+    error_message: Optional[str] = Field(default=None, description="Error message if processing failed")
+    started_at: Optional[str] = Field(default=None, description="Processing start timestamp")
+    completed_at: Optional[str] = Field(default=None, description="Processing completion timestamp") 
