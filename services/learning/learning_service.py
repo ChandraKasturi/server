@@ -520,7 +520,7 @@ class LearningService:
                     user_id=student_id,
                     subject=subject, 
                     query=question,
-                    similarity_threshold=0.2
+                    similarity_threshold=0.9
                 )
             
             # STEP 4: Combine both contexts
