@@ -81,9 +81,7 @@ class AssessUmodel(BaseModel):
 	questions: List[questionAssessUmodel]
 
 class ProfileUmodel(BaseModel):
-	email:str | None
 	username:str | None
-	mobilenumber:str | None
 	Class: str | None
 	educationboard: str | None
 	bio: str | None
