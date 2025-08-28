@@ -4,7 +4,8 @@ from typing import Optional
 from datetime import datetime, timedelta
 
 from models.pdf_models import (SubjectLearnRequest, TTSRequest, LearningPDFUploadRequest, 
-                              LearningPDFUploadResponse, LearningPDFProcessingStatus)
+                              LearningPDFUploadResponse, LearningPDFProcessingStatus,
+                              LearningImageUploadRequest, LearningImageUploadResponse)
 from models.u_models import (LearnAnswerResponse, TTSVoicesResponse, LearningInfoResponse, 
                            FetchQuestionsRequest, FetchQuestionsResponse, 
                            UpdateQuestionRequest, UpdateQuestionResponse)
@@ -670,6 +671,98 @@ async def upload_learning_pdf(
             content={
                 "success": False,
                 "message": f"Error uploading learning PDF: {str(e)}"
+            },
+            status_code=500
+        )
+
+
+@router.post("/upload-image", response_model=LearningImageUploadResponse)
+async def upload_learning_image(
+    file: UploadFile = File(...),
+    caption: str = Form(...),
+    subject: str = Form(...),
+    topic: Optional[str] = Form(None),
+    grade: Optional[str] = Form(None),
+    page_number: Optional[int] = Form(None),
+    x_auth_session: Optional[str] = Header(None),
+    user_id: str = Depends(auth_middleware)
+):
+    """Upload an image with caption for learning purposes.
+    
+    This endpoint allows students to upload images with captions that will be stored
+    in the subject-specific learning vector database for retrieval during learning sessions.
+    
+    Args:
+        file: Image file to upload (jpg, jpeg, png, gif, webp, bmp)
+        caption: Caption or description for the image
+        subject: Subject category (science, social_science, mathematics, english, hindi)
+        topic: Optional topic within the subject
+        grade: Optional grade level for the content
+        page_number: Optional page number reference if applicable
+        x_auth_session: JWT token for authentication
+        user_id: User ID extracted from JWT token
+        
+    Returns:
+        UGJSONResponse with upload results including:
+        - success: Whether the upload was successful
+        - message: Success or error message
+        - image_id: Unique identifier for the stored image
+        - image_url: URL path to the stored image
+        - subject: Subject category
+        - caption: Image caption
+        - upload_date: Upload timestamp
+    """
+    try:
+        # Early validation to prevent binary data processing issues
+        if not file:
+            return UGJSONResponse(
+                content={
+                    "success": False,
+                    "message": "No file provided"
+                },
+                status_code=400
+            )
+        
+        # Validate required fields
+        if not caption or not caption.strip():
+            return UGJSONResponse(
+                content={
+                    "success": False,
+                    "message": "Caption is required and cannot be empty"
+                },
+                status_code=400
+            )
+        
+        if not subject or not subject.strip():
+            return UGJSONResponse(
+                content={
+                    "success": False,
+                    "message": "Subject is required and cannot be empty"
+                },
+                status_code=400
+            )
+        
+        # Use the learning service to upload and process the image
+        result, status_code = await learning_service.upload_learning_image(
+            file=file,
+            user_id=user_id,
+            caption=caption,
+            subject=subject,
+            topic=topic,
+            grade=grade,
+            page_number=page_number
+        )
+        
+        return UGJSONResponse(
+            content=result,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={
+                "success": False,
+                "message": f"Error uploading learning image: {str(e)}"
             },
             status_code=500
         )

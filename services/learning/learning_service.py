@@ -520,7 +520,7 @@ class LearningService:
                     user_id=student_id,
                     subject=subject, 
                     query=question,
-                    similarity_threshold=0.4,
+                    similarity_threshold=0.3,
                     max_images=3
                 )
             
@@ -1880,4 +1880,338 @@ class LearningService:
         except Exception as e:
             print(f"Error finding relevant learning images: {str(e)}")
             
-        return relevant_images 
+        return relevant_images
+
+    async def upload_learning_image(self,
+                                    file: UploadFile,
+                                    user_id: str,
+                                    caption: str,
+                                    subject: str,
+                                    topic: Optional[str] = None,
+                                    grade: Optional[str] = None,
+                                    page_number: Optional[int] = None) -> Tuple[Dict, int]:
+        """Upload and store an image with caption for learning purposes.
+        
+        Args:
+            file: Uploaded image file
+            user_id: ID of the user
+            caption: Caption or description for the image
+            subject: Subject category (must be one of the valid subjects)
+            topic: Optional topic within the subject
+            grade: Optional grade level
+            page_number: Optional page number reference
+            
+        Returns:
+            Tuple of (response_data, status_code)
+        """
+        try:
+            # Validate subject
+            if subject not in self.SUBJECT_COLLECTIONS:
+                return {
+                    "success": False,
+                    "message": f"Invalid subject: {subject}. Valid subjects are: {', '.join(self.SUBJECT_COLLECTIONS.keys())}"
+                }, 400
+            
+            # Validate file type (allow common image formats)
+            allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+            file_extension = None
+            if file.filename:
+                file_extension = '.' + file.filename.lower().split('.')[-1]
+                if file_extension not in allowed_extensions:
+                    return {
+                        "success": False,
+                        "message": f"Invalid image format. Allowed formats: {', '.join(allowed_extensions)}"
+                    }, 400
+            else:
+                return {
+                    "success": False,
+                    "message": "No filename provided"
+                }, 400
+            
+            # Validate file size (max 10MB for images)
+            if file.size and file.size > 10 * 1024 * 1024:
+                return {
+                    "success": False,
+                    "message": "Image size too large. Maximum size is 10MB."
+                }, 400
+            
+            # Generate unique ID and filename for the image
+            image_id = str(uuid.uuid4())
+            filename = f"learning_image_{image_id}{file_extension}"
+            
+            # Save the uploaded file to static directory
+            file_contents = await file.read()
+            
+            # Process and save the image
+            result = await self._process_learning_image_async(
+                image_id=image_id,
+                user_id=user_id,
+                caption=caption,
+                subject=subject,
+                topic=topic,
+                grade=grade,
+                page_number=page_number,
+                file_contents=file_contents,
+                filename=filename,
+                original_filename=file.filename
+            )
+            
+            return result
+            
+        except Exception as e:
+            error_message = f"Error uploading learning image: {str(e)}"
+            print(error_message)
+            return {
+                "success": False,
+                "message": error_message
+            }, 500
+
+    async def _process_learning_image_async(self,
+                                            image_id: str,
+                                            user_id: str,
+                                            caption: str,
+                                            subject: str,
+                                            topic: Optional[str],
+                                            grade: Optional[str],
+                                            page_number: Optional[int],
+                                            file_contents: bytes,
+                                            filename: str,
+                                            original_filename: str) -> Tuple[Dict, int]:
+        """Process and store a learning image with its caption in vector database.
+        
+        Args:
+            image_id: Unique identifier for the image
+            user_id: ID of the user
+            caption: Caption or description for the image
+            subject: Subject category
+            topic: Optional topic
+            grade: Optional grade level
+            page_number: Optional page number reference
+            file_contents: Raw image file content
+            filename: Generated filename
+            original_filename: Original uploaded filename
+            
+        Returns:
+            Tuple of (response_data, status_code)
+        """
+        try:
+            # Save image to static directory
+            image_url = await self._save_learning_image_to_static_async(
+                file_contents, filename, subject, user_id
+            )
+            
+            # Store image caption in vector database
+            success = await self._store_single_learning_image_caption_async(
+                image_id=image_id,
+                user_id=user_id,
+                subject=subject,
+                caption=caption,
+                image_url=image_url,
+                topic=topic,
+                grade=grade,
+                page_number=page_number,
+                original_filename=original_filename
+            )
+            
+            if success:
+                response_data = {
+                    "success": True,
+                    "message": "Image uploaded and processed successfully",
+                    "image_id": image_id,
+                    "image_url": image_url,
+                    "subject": subject,
+                    "caption": caption,
+                    "upload_date": datetime.utcnow().isoformat()
+                }
+                return response_data, 200
+            else:
+                return {
+                    "success": False,
+                    "message": "Failed to store image caption in vector database"
+                }, 500
+                
+        except Exception as e:
+            error_message = f"Error processing learning image: {str(e)}"
+            print(error_message)
+            return {
+                "success": False,
+                "message": error_message
+            }, 500
+
+    async def _save_learning_image_to_static_async(self,
+                                                   file_contents: bytes,
+                                                   filename: str,
+                                                   subject: str,
+                                                   user_id: str) -> str:
+        """Save learning image to static directory (async).
+        
+        Args:
+            file_contents: Raw image file content
+            filename: Filename to save as
+            subject: Subject category
+            user_id: ID of the user
+            
+        Returns:
+            URL path to the saved image
+        """
+        def _save_image_sync():
+            return self._save_learning_image_to_static(file_contents, filename, subject, user_id)
+        
+        # Run the file operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _save_image_sync)
+
+    def _save_learning_image_to_static(self,
+                                       file_contents: bytes,
+                                       filename: str,
+                                       subject: str,
+                                       user_id: str) -> str:
+        """Save learning image to static directory.
+        
+        Args:
+            file_contents: Raw image file content
+            filename: Filename to save as
+            subject: Subject category
+            user_id: ID of the user
+            
+        Returns:
+            URL path to the saved image
+        """
+        # Create directory structure: static/learning_images/{subject}/{user_id}/
+        current_file_path = os.path.abspath(__file__)
+        path_parts = current_file_path.replace('\\', '/').split('/')
+        server_indices = [i for i, part in enumerate(path_parts) if part == 'server']
+        
+        if server_indices:
+            server_index = server_indices[0]
+            server_path_parts = path_parts[:server_index + 1]
+            server_dir = '/'.join(server_path_parts)
+            server_dir = server_dir.replace('/', os.sep)
+        else:
+            working_dir = os.getcwd()
+            server_dir = os.path.join(working_dir, 'server')
+        
+        # Create the learning images directory structure
+        static_dir = os.path.join(server_dir, "static")
+        learning_images_dir = os.path.join(static_dir, "learning_images", subject, user_id)
+        
+        # Ensure directory exists
+        os.makedirs(learning_images_dir, exist_ok=True)
+        
+        # Save image file
+        file_path = os.path.join(learning_images_dir, filename)
+        with open(file_path, "wb") as f:
+            f.write(file_contents)
+        
+        # Return URL path (relative to static directory)
+        url_path = f"/static/learning_images/{subject}/{user_id}/{filename}"
+        print(f"Saved learning image to: {file_path}")
+        print(f"Generated URL: {url_path}")
+        
+        return url_path
+
+    async def _store_single_learning_image_caption_async(self,
+                                                         image_id: str,
+                                                         user_id: str,
+                                                         subject: str,
+                                                         caption: str,
+                                                         image_url: str,
+                                                         topic: Optional[str] = None,
+                                                         grade: Optional[str] = None,
+                                                         page_number: Optional[int] = None,
+                                                         original_filename: Optional[str] = None) -> bool:
+        """Store a single learning image caption in vector database (async).
+        
+        Args:
+            image_id: Unique identifier for the image
+            user_id: ID of the user
+            subject: Subject category
+            caption: Image caption
+            image_url: URL path to the image
+            topic: Optional topic
+            grade: Optional grade level
+            page_number: Optional page number reference
+            original_filename: Original uploaded filename
+            
+        Returns:
+            True if successfully stored
+        """
+        def _store_caption_sync():
+            return asyncio.run(self._store_single_learning_image_caption(
+                image_id, user_id, subject, caption, image_url, topic, grade, page_number, original_filename
+            ))
+        
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, _store_caption_sync)
+
+    async def _store_single_learning_image_caption(self,
+                                                   image_id: str,
+                                                   user_id: str,
+                                                   subject: str,
+                                                   caption: str,
+                                                   image_url: str,
+                                                   topic: Optional[str] = None,
+                                                   grade: Optional[str] = None,
+                                                   page_number: Optional[int] = None,
+                                                   original_filename: Optional[str] = None) -> bool:
+        """Store a single learning image caption in vector database.
+        
+        Args:
+            image_id: Unique identifier for the image
+            user_id: ID of the user
+            subject: Subject category
+            caption: Image caption
+            image_url: URL path to the image
+            topic: Optional topic
+            grade: Optional grade level
+            page_number: Optional page number reference
+            original_filename: Original uploaded filename
+            
+        Returns:
+            True if successfully stored
+        """
+        try:
+            # Create subject-specific collection name for learning images
+            collection_name = f"learning_{subject}_images_{user_id}"
+            
+            # Use the main PGVector connection
+            connection_string = settings.PGVECTOR_CONNECTION_STRING
+            
+            # Initialize embeddings
+            embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
+            
+            # Use PGVector with subject-specific collection
+            vector_store = PGVector(
+                embeddings=embeddings,
+                collection_name=collection_name,
+                connection=connection_string,
+                use_jsonb=True
+            )
+            
+            # Create document with comprehensive metadata
+            doc = Document(
+                page_content=caption,
+                metadata={
+                    'image_id': image_id,
+                    'user_id': user_id,
+                    'subject': subject,
+                    'topic': topic or '',
+                    'grade': grade or '',
+                    'page_number': page_number,
+                    'image_url': image_url,
+                    'original_filename': original_filename or '',
+                    'type': 'user_uploaded_learning_image',
+                    'source': 'user_upload',
+                    'upload_date': datetime.utcnow().isoformat()
+                }
+            )
+            
+            # Add document to vector store
+            vector_store.add_documents([doc])
+            print(f"Successfully stored learning image caption in vector database for {subject}")
+            return True
+                
+        except Exception as e:
+            print(f"Error storing learning image caption in vector database: {str(e)}")
+            return False 

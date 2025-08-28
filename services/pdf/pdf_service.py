@@ -1077,7 +1077,7 @@ class PDFProcessingService:
                     try:
                         # Open the image with PIL
                         pil_image = PIL.Image.open(image_filename)
-                        
+                        print(f"Creating caption for image {image_filename}")
                         # Generate caption
                         response = client.models.generate_content(
                             model="gemini-2.5-pro",

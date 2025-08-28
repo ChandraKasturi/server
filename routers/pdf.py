@@ -253,7 +253,7 @@ async def get_pdf(
         processing_status = await redis_client.hgetall(f"pdf_processing_status:{pdf_id}")
         
         # Combine with PDF data
-        pdf_data = pdf.model_dump()
+        pdf_data = pdf.model_dump_json()
        
         print(f"PDF data: {pdf_data}")
         return UGJSONResponse(
