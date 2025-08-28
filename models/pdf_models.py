@@ -332,4 +332,24 @@ class LearningPDFProcessingStatus(BaseModel):
     images_processed: Optional[int] = Field(default=0, description="Number of images processed")
     error_message: Optional[str] = Field(default=None, description="Error message if processing failed")
     started_at: Optional[str] = Field(default=None, description="Processing start timestamp")
-    completed_at: Optional[str] = Field(default=None, description="Processing completion timestamp") 
+    completed_at: Optional[str] = Field(default=None, description="Processing completion timestamp")
+
+
+class LearningImageUploadRequest(BaseModel):
+    """Model for learning image upload request."""
+    caption: str = Field(..., description="Caption or description for the image")
+    subject: str = Field(..., description="Subject category (science, social_science, mathematics, english, hindi)")
+    topic: Optional[str] = Field(default=None, description="Topic within the subject")
+    grade: Optional[str] = Field(default=None, description="Grade level for the content")
+    page_number: Optional[int] = Field(default=None, description="Page number reference if applicable")
+
+
+class LearningImageUploadResponse(BaseModel):
+    """Model for learning image upload response."""
+    success: bool = Field(..., description="Whether the upload was successful")
+    message: str = Field(..., description="Success or error message")
+    image_id: Optional[str] = Field(default=None, description="Unique identifier for the stored image")
+    image_url: Optional[str] = Field(default=None, description="URL path to the stored image")
+    subject: Optional[str] = Field(default=None, description="Subject category")
+    caption: Optional[str] = Field(default=None, description="Image caption")
+    upload_date: Optional[str] = Field(default=None, description="Upload timestamp") 
