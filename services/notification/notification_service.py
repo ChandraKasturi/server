@@ -142,6 +142,7 @@ class NotificationService:
         }
         
         try:
+            print(f"Params: {params}")
             response = requests.get(self.sms_api_url, params=params, verify=False)
             print(f"SMS sent to {phone_number} with status code {response.status_code} and response {response.text}")
             return response.status_code == 200
