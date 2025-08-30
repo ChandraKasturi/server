@@ -177,7 +177,7 @@ class NotificationService:
         Returns:
             True if successful, False otherwise
         """
-        message = f"Your Sahasra password reset OTP is {token}. Please enter this code to reset your password. The code is valid for 10 minutes."
+        message = f"Your Sahasra password reset OTP is {token}. Please enter this code to reset your password. The code is valid for 10 minutes. Do not share it with anyone."
         
         return self.send_sms(
             phone_number, 
