@@ -8,9 +8,11 @@ from models.u_models import (
     AssessmentGenerationResponse, AssessmentSubmissionResponse, AssessmentListResponse,
     AssessmentByIdResponse, FeedbackResponse, ProgressResponse, SubjectProgress,
     AssessmentSubmissionsListResponse, AssessmentPDFListResponse, SubjectHistoryResponse,
-    AssessmentHistoryItem, AssessmentHistoryItemFiltered, AssessmentSubmissionItem, HistoryDatesResponse, HistoryDatesData
+    AssessmentHistoryItem, AssessmentHistoryItemFiltered, AssessmentSubmissionItem, HistoryDatesResponse, HistoryDatesData,
+    AssessmentStatisticsResponse, AchievementsResponse, BadgesResponse, StreaksResponse, AchievementSummaryResponse
 )
 from services.assessment.assessment_service import AssessmentService
+from services.assessment.achievement_service import AchievementService
 from routers.auth import auth_middleware
 from utils.json_response import UGJSONResponse
 from repositories.mongo_repository import FeedbackRepository, HistoryRepository
@@ -18,6 +20,7 @@ from repositories.mongo_repository import FeedbackRepository, HistoryRepository
 router = APIRouter(tags=["Assessment"])
 
 assessment_service = AssessmentService()
+achievement_service = AchievementService()
 feedback_repo = FeedbackRepository()
 history_repository = HistoryRepository()
 
@@ -434,5 +437,192 @@ def get_history_dates(
     except Exception as e:
         return UGJSONResponse(
             content={"Message": f"Error getting available dates: {str(e)}"},
+            status_code=500
+        )
+
+@router.get("/assessment_info", response_model=AssessmentStatisticsResponse)
+def get_assessment_statistics(
+    request: Request,
+    student_id: str = Depends(auth_middleware),
+    days_back: Optional[int] = None
+):
+    """Get comprehensive assessment statistics for a student.
+    
+    This endpoint provides overall assessment performance metrics including:
+    - Total assessments created vs completed
+    - Overall average score across all subjects
+    - Total number of submissions
+    - Statistics broken down by subject
+    - Assessment streak (consecutive days with assessments)
+    
+    An assessment is considered "completed" if it has a last_submission field,
+    meaning the student has submitted answers at least once.
+    
+    Args:
+        request: FastAPI request object
+        student_id: ID of the student (from auth middleware)
+        days_back: Optional number of days to look back for statistics.
+                  If None, returns all-time statistics.
+        
+    Returns:
+        JSON response with comprehensive assessment statistics
+    """
+    try:
+        # Validate days_back parameter
+        if days_back is not None and days_back < 1:
+            return UGJSONResponse(
+                content={"Message": "days_back must be a positive integer"},
+                status_code=400
+            )
+        
+        # Get assessment statistics from service
+        stats, status_code = assessment_service.get_assessment_statistics(student_id, days_back)
+        
+        return UGJSONResponse(
+            content=stats,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"Message": f"Error getting assessment statistics: {str(e)}"},
+            status_code=500
+        )
+
+@router.get("/achievements", response_model=AchievementsResponse)
+def get_student_achievements(
+    request: Request,
+    student_id: str = Depends(auth_middleware),
+    achievement_type: Optional[str] = None
+):
+    """Get all achievements for a student.
+    
+    This endpoint returns all achievements earned by the student, optionally filtered by type.
+    Achievement types include: performance, consistency, coverage, difficulty.
+    
+    Args:
+        request: FastAPI request object
+        student_id: ID of the student (from auth middleware)
+        achievement_type: Optional filter by achievement type
+        
+    Returns:
+        JSON response with achievements list and summary statistics
+    """
+    try:
+        achievements_data, status_code = achievement_service.get_student_achievements(
+            student_id, achievement_type
+        )
+        
+        return UGJSONResponse(
+            content=achievements_data,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"Message": f"Error getting achievements: {str(e)}"},
+            status_code=500
+        )
+
+@router.get("/badges", response_model=BadgesResponse)
+def get_student_badges(
+    request: Request,
+    student_id: str = Depends(auth_middleware),
+    badge_type: Optional[str] = None,
+    subject: Optional[str] = None
+):
+    """Get all badges for a student.
+    
+    This endpoint returns all badges earned by the student, optionally filtered by type and subject.
+    Badge types include: topic_mastery, subject_mastery, consistency, coverage, difficulty, improvement, time_management.
+    
+    Args:
+        request: FastAPI request object
+        student_id: ID of the student (from auth middleware)
+        badge_type: Optional filter by badge type
+        subject: Optional filter by subject
+        
+    Returns:
+        JSON response with badges list and summary statistics
+    """
+    try:
+        badges_data, status_code = achievement_service.get_student_badges(
+            student_id, badge_type, subject
+        )
+        
+        return UGJSONResponse(
+            content=badges_data,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"Message": f"Error getting badges: {str(e)}"},
+            status_code=500
+        )
+
+@router.get("/streaks", response_model=StreaksResponse)
+def get_student_streaks(
+    request: Request,
+    student_id: str = Depends(auth_middleware)
+):
+    """Get all streaks for a student.
+    
+    This endpoint returns all streaks (daily, subject-specific, weekly) for the student
+    with current and historical streak information.
+    
+    Args:
+        request: FastAPI request object
+        student_id: ID of the student (from auth middleware)
+        
+    Returns:
+        JSON response with organized streak information
+    """
+    try:
+        streaks_data, status_code = achievement_service.get_student_streaks(student_id)
+        
+        return UGJSONResponse(
+            content=streaks_data,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"Message": f"Error getting streaks: {str(e)}"},
+            status_code=500
+        )
+
+@router.get("/achievement-summary", response_model=AchievementSummaryResponse)
+def get_achievement_summary(
+    request: Request,
+    student_id: str = Depends(auth_middleware)
+):
+    """Get a comprehensive achievement summary for a student.
+    
+    This endpoint provides an overview of the student's achievement progress including:
+    - Total achievements and badges earned
+    - Highest badge tier achieved
+    - Current and longest streaks
+    - Recent achievements and featured badges
+    - Quick statistics for dashboard display
+    
+    Args:
+        request: FastAPI request object
+        student_id: ID of the student (from auth middleware)
+        
+    Returns:
+        JSON response with comprehensive achievement summary
+    """
+    try:
+        summary_data, status_code = achievement_service.get_achievement_summary(student_id)
+        
+        return UGJSONResponse(
+            content=summary_data,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"Message": f"Error getting achievement summary: {str(e)}"},
             status_code=500
         ) 

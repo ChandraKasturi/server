@@ -230,12 +230,23 @@ class AssessmentSubmissionResultItem(BaseModel):
     is_correct: bool
     feedback: str
 
+class AchievementProcessingResult(BaseModel):
+    """Model for achievement processing results in assessment submission"""
+    achievements_earned: List[str] = []
+    badges_updated: List[str] = []
+    streaks_updated: List[str] = []
+    errors: List[str] = []
+    achievement_details: List[Dict[str, Any]] = []
+    badge_details: List[Dict[str, Any]] = []
+    streak_details: List[Dict[str, Any]] = []
+
 class AssessmentSubmissionResponse(BaseModel):
     """Response from submit_assessment service"""
     results: List[AssessmentSubmissionResultItem]
     correct_count: int
     total_questions: int
     score_percentage: float
+    achievements: Optional[AchievementProcessingResult] = None
 
 class AssessmentLastSubmission(BaseModel):
     """Last submission data from MongoDB assessments"""
@@ -668,3 +679,103 @@ class UpdateQuestionResponse(BaseModel):
     message: str
     document_id: Optional[str] = None
     updated_at: Optional[str] = None
+
+# ASSESSMENT STATISTICS MODELS
+class AssessmentStreakInfo(BaseModel):
+    """Assessment streak information"""
+    current_streak: int
+    last_activity_date: Optional[str]
+    longest_streak: int
+    total_active_days: int
+
+class SubjectAssessmentStats(BaseModel):
+    """Assessment statistics for a specific subject"""
+    total_assessments: int
+    completed_assessments: int
+    total_score: float
+    average_score: float
+    total_submissions: int
+
+class AssessmentStatisticsResponse(BaseModel):
+    """Response from assessment statistics endpoint"""
+    total_assessments: int
+    completed_assessments: int
+    average_score: float
+    total_submissions: int
+    by_subject: Dict[str, SubjectAssessmentStats]
+    assessment_streak: AssessmentStreakInfo
+    days_filter: Optional[int] = None
+
+# ACHIEVEMENT SYSTEM MODELS
+
+
+class Achievement(BaseModel):
+    """Model for a student achievement"""
+    achievement_id: str
+    achievement_type: str  # performance, consistency, coverage, difficulty
+    name: str
+    description: str
+    icon: str
+    count: int = 1
+    first_earned: str
+    last_earned: str
+    metadata: Optional[Dict[str, Any]] = None
+
+class Badge(BaseModel):
+    """Model for a student badge"""
+    badge_id: str
+    badge_type: str  # topic_mastery, subject_mastery, consistency, etc.
+    name: str
+    tier: str  # bronze, silver, gold, platinum, diamond
+    subject: Optional[str] = None
+    topic: Optional[str] = None
+    earned_date: str
+    updated_at: str
+    progress: Dict[str, Any]
+
+class Streak(BaseModel):
+    """Model for a student streak"""
+    streak_type: str  # daily, subject, weekly
+    subject: Optional[str] = None
+    current_streak: int
+    longest_streak: int
+    last_activity_date: Optional[str] = None
+    streak_start_date: Optional[str] = None
+    updated_at: str
+    grace_days_used: Optional[int] = 0
+    weekly_progress: Optional[Dict[str, Any]] = None
+
+class AchievementsResponse(BaseModel):
+    """Response model for student achievements"""
+    achievements: List[Achievement]
+    total_count: int
+    by_type: Dict[str, int]
+
+class BadgesResponse(BaseModel):
+    """Response model for student badges"""
+    badges: List[Badge]
+    total_count: int
+    by_type: Dict[str, int]
+    by_tier: Dict[str, int]
+
+class StreaksResponse(BaseModel):
+    """Response model for student streaks"""
+    streaks: List[Streak]
+    daily_streak: Optional[Streak] = None
+    subject_streaks: List[Streak] = []
+    weekly_streak: Optional[Streak] = None
+
+class AchievementSummary(BaseModel):
+    """Summary model for achievement overview"""
+    total_achievements: int
+    total_badges: int
+    highest_badge_tier: str
+    current_daily_streak: int
+    longest_daily_streak: int
+    recent_achievements: List[Achievement]
+    featured_badges: List[Badge]
+
+class AchievementSummaryResponse(BaseModel):
+    """Response model for achievement summary"""
+    summary: AchievementSummary
+    quick_stats: Dict[str, Any]
