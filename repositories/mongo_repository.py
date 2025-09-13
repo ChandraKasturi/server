@@ -933,6 +933,478 @@ class HistoryRepository(MongoRepository):
             "by_subject": by_subject
         }
 
+    def get_assessment_statistics(self, student_id: str, from_date: datetime = None) -> Dict[str, Any]:
+        """Get comprehensive assessment statistics for a student.
+        
+        Args:
+            student_id: ID of the student
+            from_date: Optional datetime to filter assessments from this date onwards
+            
+        Returns:
+            Dictionary with assessment statistics including:
+            - total_assessments: Total number of assessments created
+            - completed_assessments: Number of assessments with submissions
+            - average_score: Overall average score across all completed assessments
+            - total_submissions: Total number of assessment submissions
+            - by_subject: Statistics broken down by subject
+            - assessment_streak: Current streak of consecutive days with assessments
+        """
+        collection = self.get_collection(student_id, "sahasra_assessments")
+        
+        # Build query - exclude assessments with pdf_id
+        query = {"pdf_id": {"$exists": False}}
+        if from_date:
+            query["created_at"] = {"$gte": from_date}
+        
+        # Get all assessments
+        all_assessments = list(collection.find(query))
+        
+        total_assessments = len(all_assessments)
+        completed_assessments = 0
+        total_score = 0
+        total_submissions = 0
+        by_subject = {}
+        
+        # Process each assessment
+        for assessment in all_assessments:
+            # Check if assessment is completed (has last_submission)
+            if "last_submission" in assessment and assessment["last_submission"]:
+                completed_assessments += 1
+                
+                # Get score from last submission
+                last_submission = assessment["last_submission"]
+                if "score_percentage" in last_submission:
+                    score = last_submission["score_percentage"]
+                    total_score += score
+                
+                # Count submission
+                submission_count = assessment.get("submission_count", 1)
+                total_submissions += submission_count
+                
+                # Track by subject
+                subject = assessment.get("subject", "unknown")
+                if subject not in by_subject:
+                    by_subject[subject] = {
+                        "total_assessments": 0,
+                        "completed_assessments": 0,
+                        "total_score": 0,
+                        "average_score": 0,
+                        "total_submissions": 0
+                    }
+                
+                by_subject[subject]["completed_assessments"] += 1
+                by_subject[subject]["total_score"] += score
+                by_subject[subject]["total_submissions"] += submission_count
+            
+            # Count total assessments by subject
+            subject = assessment.get("subject", "unknown")
+            if subject not in by_subject:
+                by_subject[subject] = {
+                    "total_assessments": 0,
+                    "completed_assessments": 0,
+                    "total_score": 0,
+                    "average_score": 0,
+                    "total_submissions": 0
+                }
+            by_subject[subject]["total_assessments"] += 1
+        
+        # Calculate average scores
+        overall_average_score = (total_score / completed_assessments) if completed_assessments > 0 else 0
+        
+        for subject_stats in by_subject.values():
+            if subject_stats["completed_assessments"] > 0:
+                subject_stats["average_score"] = subject_stats["total_score"] / subject_stats["completed_assessments"]
+        
+        # Calculate assessment streak (consecutive days with assessments)
+        assessment_streak = self._calculate_assessment_streak(student_id, from_date)
+        
+        return {
+            "total_assessments": total_assessments,
+            "completed_assessments": completed_assessments,
+            "average_score": round(overall_average_score, 2),
+            "total_submissions": total_submissions,
+            "by_subject": by_subject,
+            "assessment_streak": assessment_streak
+        }
+
+    def _calculate_assessment_streak(self, student_id: str, from_date: datetime = None) -> Dict[str, Any]:
+        """Calculate assessment streak for a student.
+        
+        Args:
+            student_id: ID of the student
+            from_date: Optional datetime to filter from
+            
+        Returns:
+            Dictionary with streak information
+        """
+        collection = self.get_collection(student_id, "sahasra_assessments")
+        
+        # Build query to get assessments with submissions, excluding PDF assessments
+        query = {
+            "last_submission": {"$exists": True},
+            "pdf_id": {"$exists": False}
+        }
+        if from_date:
+            query["last_submission_time"] = {"$gte": from_date}
+        
+        # Get all completed assessments using aggregation to ensure no duplicate dates
+        pipeline = [
+            {"$match": query},
+            {
+                "$addFields": {
+                    "date_only": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%d",
+                            "date": "$last_submission_time"
+                        }
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$date_only",  # This ensures each date appears only once
+                    "assessment_count": {"$sum": 1},
+                    "latest_time": {"$max": "$last_submission_time"}
+                }
+            },
+            {
+                "$sort": {"_id": -1}  # Sort by date descending (newest first)
+            }
+        ]
+        
+        activity_dates = list(collection.aggregate(pipeline))
+        
+        if not activity_dates:
+            return {
+                "current_streak": 0,
+                "last_activity_date": None,
+                "longest_streak": 0,
+                "total_active_days": 0
+            }
+        
+        # Convert to date objects
+        from datetime import datetime, timedelta
+        active_dates = []
+        
+        for item in activity_dates:
+            date_obj = datetime.strptime(item["_id"], "%Y-%m-%d").date()
+            active_dates.append(date_obj)
+        
+        # Dates should already be sorted from MongoDB, but ensure newest first
+        active_dates.sort(reverse=True)
+        
+        # Calculate current streak (consecutive days from today backwards)
+        today = datetime.utcnow().date()
+        current_streak = 0
+        
+        # Start checking from today
+        check_date = today
+        
+        for active_date in active_dates:
+            # Check if this active date is consecutive with our streak
+            if active_date == check_date:
+                current_streak += 1
+                check_date = check_date - timedelta(days=1)
+            elif active_date == check_date - timedelta(days=1):
+                # Allow for 1-day gap (grace period)
+                current_streak += 1
+                check_date = active_date - timedelta(days=1)
+            else:
+                # Gap is too large, streak is broken
+                break
+        
+        # Calculate longest streak in history
+        longest_streak = 0
+        temp_streak = 1
+        
+        if len(active_dates) > 1:
+            for i in range(1, len(active_dates)):
+                prev_date = active_dates[i-1]  # More recent date
+                curr_date = active_dates[i]    # Older date
+                
+                # Calculate difference between consecutive dates
+                diff = (prev_date - curr_date).days
+                
+                if diff == 1:  # Consecutive days
+                    temp_streak += 1
+                elif diff == 2:  # 1-day gap (grace period)
+                    temp_streak += 1
+                else:
+                    # Gap is too large, start new streak
+                    longest_streak = max(longest_streak, temp_streak)
+                    temp_streak = 1
+            
+            # Don't forget the last streak
+            longest_streak = max(longest_streak, temp_streak)
+        else:
+            longest_streak = 1 if active_dates else 0
+        
+        # Make sure current streak doesn't exceed longest streak
+        longest_streak = max(longest_streak, current_streak)
+        
+        return {
+            "current_streak": current_streak,
+            "last_activity_date": active_dates[0].isoformat() if active_dates else None,
+            "longest_streak": longest_streak,
+            "total_active_days": len(active_dates)
+        }
+
+class AchievementRepository(MongoRepository):
+    """Repository for achievement-related operations."""
+    
+    def get_achievements_collection(self, student_id: str):
+        """Get achievements collection for a student."""
+        return self.get_collection(student_id, "achievements")
+    
+    def get_badges_collection(self, student_id: str):
+        """Get badges collection for a student."""
+        return self.get_collection(student_id, "badges")
+    
+    def get_streaks_collection(self, student_id: str):
+        """Get streaks collection for a student."""
+        return self.get_collection(student_id, "streaks")
+    
+    # Achievement methods
+    def get_student_achievements(self, student_id: str, achievement_type: str = None) -> List[Dict]:
+        """Get all achievements for a student."""
+        collection = self.get_achievements_collection(student_id)
+        query = {}
+        if achievement_type:
+            query["achievement_type"] = achievement_type
+        return list(collection.find(query))
+    
+    def add_achievement(self, student_id: str, achievement_data: Dict) -> str:
+        """Add a new achievement for a student."""
+        collection = self.get_achievements_collection(student_id)
+        achievement_data["first_earned"] = datetime.utcnow()
+        achievement_data["last_earned"] = datetime.utcnow()
+        result = collection.insert_one(achievement_data)
+        return str(result.inserted_id)
+    
+    def update_achievement_count(self, student_id: str, achievement_id: str) -> bool:
+        """Update achievement count for repeatable achievements."""
+        collection = self.get_achievements_collection(student_id)
+        result = collection.update_one(
+            {"achievement_id": achievement_id},
+            {
+                "$inc": {"count": 1},
+                "$set": {"last_earned": datetime.utcnow()}
+            }
+        )
+        return result.modified_count > 0
+    
+    def get_achievement_by_id(self, student_id: str, achievement_id: str) -> Optional[Dict]:
+        """Get a specific achievement by achievement_id."""
+        collection = self.get_achievements_collection(student_id)
+        return collection.find_one({"achievement_id": achievement_id})
+    
+    # Badge methods
+    def get_student_badges(self, student_id: str, badge_type: str = None, subject: str = None) -> List[Dict]:
+        """Get all badges for a student."""
+        collection = self.get_badges_collection(student_id)
+        query = {}
+        if badge_type:
+            query["badge_type"] = badge_type
+        if subject:
+            query["subject"] = subject
+        return list(collection.find(query))
+    
+    def upsert_badge(self, student_id: str, badge_data: Dict) -> bool:
+        """Insert or update a badge for a student."""
+        collection = self.get_badges_collection(student_id)
+        badge_data["updated_at"] = datetime.utcnow()
+        
+        # Use badge_id as unique identifier
+        filter_query = {"badge_id": badge_data["badge_id"]}
+        
+        result = collection.update_one(
+            filter_query,
+            {"$set": badge_data},
+            upsert=True
+        )
+        return result.acknowledged
+    
+    def update_badge_tier(self, student_id: str, badge_id: str, new_tier: str, progress_data: Dict) -> bool:
+        """Update badge tier and progress."""
+        collection = self.get_badges_collection(student_id)
+        result = collection.update_one(
+            {"badge_id": badge_id},
+            {
+                "$set": {
+                    "tier": new_tier,
+                    "progress": progress_data,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        return result.modified_count > 0
+    
+    def get_badge_by_id(self, student_id: str, badge_id: str) -> Optional[Dict]:
+        """Get a specific badge by badge_id."""
+        collection = self.get_badges_collection(student_id)
+        return collection.find_one({"badge_id": badge_id})
+    
+    # Streak methods
+    def get_student_streaks(self, student_id: str, streak_type: str = None) -> List[Dict]:
+        """Get all streaks for a student."""
+        collection = self.get_streaks_collection(student_id)
+        query = {}
+        if streak_type:
+            query["streak_type"] = streak_type
+        return list(collection.find(query))
+    
+    def update_streak(self, student_id: str, streak_data: Dict) -> bool:
+        """Update or insert streak data."""
+        collection = self.get_streaks_collection(student_id)
+        streak_data["updated_at"] = datetime.utcnow()
+        
+        # Create filter based on streak_type and subject
+        filter_query = {"streak_type": streak_data["streak_type"]}
+        if "subject" in streak_data and streak_data["subject"]:
+            filter_query["subject"] = streak_data["subject"]
+        else:
+            filter_query["subject"] = {"$exists": False}
+        
+        result = collection.update_one(
+            filter_query,
+            {"$set": streak_data},
+            upsert=True
+        )
+        return result.acknowledged
+    
+    def reset_streak(self, student_id: str, streak_type: str, subject: str = None) -> bool:
+        """Reset a specific streak for a student."""
+        collection = self.get_streaks_collection(student_id)
+        
+        filter_query = {"streak_type": streak_type}
+        if subject:
+            filter_query["subject"] = subject
+        else:
+            filter_query["subject"] = {"$exists": False}
+        
+        result = collection.update_one(
+            filter_query,
+            {
+                "$set": {
+                    "current_streak": 0,
+                    "streak_start_date": None,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        return result.modified_count > 0
+    
+    def get_streak_by_type(self, student_id: str, streak_type: str, subject: str = None) -> Optional[Dict]:
+        """Get a specific streak by type and subject."""
+        collection = self.get_streaks_collection(student_id)
+        
+        filter_query = {"streak_type": streak_type}
+        if subject:
+            filter_query["subject"] = subject
+        else:
+            filter_query["subject"] = {"$exists": False}
+        
+        return collection.find_one(filter_query)
+    
+    # Analysis methods for achievement calculations
+    def get_assessment_history_for_topic(self, student_id: str, subject: str, topic: str, days_back: int = 30) -> List[Dict]:
+        """Get assessment history for a specific topic within a time window."""
+        assessments_collection = self.get_collection(student_id, "sahasra_assessments")
+        
+        from_date = datetime.utcnow() - timedelta(days=days_back)
+        
+        query = {
+            "subject": subject,
+            "$or": [
+                {"topics": topic},  # New format with topics array
+                {"topic": topic}    # Legacy format with single topic
+            ],
+            "last_submission": {"$exists": True},
+            "created_at": {"$gte": from_date}
+        }
+        
+        return list(assessments_collection.find(query).sort("created_at", 1))
+    
+    def get_subject_topic_coverage(self, student_id: str, subject: str) -> Dict[str, Any]:
+        """Get topic coverage statistics for a subject."""
+        assessments_collection = self.get_collection(student_id, "sahasra_assessments")
+        
+        # Get all assessments for the subject
+        query = {"subject": subject}
+        assessments = list(assessments_collection.find(query))
+        
+        # Extract unique topics attempted
+        attempted_topics = set()
+        for assessment in assessments:
+            # Handle both new format (topics array) and legacy format (topic string)
+            topics = assessment.get("topics", [])
+            if isinstance(topics, list):
+                attempted_topics.update(topics)
+            elif isinstance(topics, str):
+                attempted_topics.add(topics)
+            
+            # Check legacy topic field
+            if "topic" in assessment:
+                attempted_topics.add(assessment["topic"])
+        
+        return {
+            "attempted_topics": list(attempted_topics),
+            "attempted_count": len(attempted_topics)
+        }
+    
+    def get_difficulty_progression(self, student_id: str, subject: str, topic: str) -> List[Dict]:
+        """Get difficulty progression for a specific topic."""
+        assessments_collection = self.get_collection(student_id, "sahasra_assessments")
+        
+        query = {
+            "subject": subject,
+            "$or": [
+                {"topics": topic},  # New format with topics array
+                {"topic": topic}    # Legacy format with single topic
+            ],
+            "last_submission": {"$exists": True}
+        }
+        
+        assessments = list(assessments_collection.find(query).sort("created_at", 1))
+        
+        progression = []
+        for assessment in assessments:
+            progression.append({
+                "level": assessment.get("level", 1),
+                "score": assessment.get("last_submission", {}).get("score_percentage", 0),
+                "date": assessment.get("created_at"),
+                "assessment_id": str(assessment.get("_id", ""))
+            })
+        
+        return progression
+    
+    def calculate_rolling_average(self, student_id: str, subject: str, topic: str, window_size: int = 5) -> float:
+        """Calculate rolling average score for a topic."""
+        history = self.get_assessment_history_for_topic(student_id, subject, topic, days_back=90)
+        
+        if len(history) < window_size:
+            # Use all available scores if less than window size
+            scores = [h.get("last_submission", {}).get("score_percentage", 0) for h in history]
+        else:
+            # Use last N scores
+            recent_history = history[-window_size:]
+            scores = [h.get("last_submission", {}).get("score_percentage", 0) for h in recent_history]
+        
+        return sum(scores) / len(scores) if scores else 0.0
+    
+    def get_recent_assessments_by_date(self, student_id: str, days_back: int = 30) -> List[Dict]:
+        """Get recent assessments grouped by date for streak calculations."""
+        assessments_collection = self.get_collection(student_id, "sahasra_assessments")
+        
+        from_date = datetime.utcnow() - timedelta(days=days_back)
+        
+        query = {
+            "last_submission": {"$exists": True},
+            "last_submission_time": {"$gte": from_date}
+        }
+        
+        return list(assessments_collection.find(query).sort("last_submission_time", 1))
+
 class QuotesRepository(MongoRepository):
     """Repository for educational quotes operations."""
     

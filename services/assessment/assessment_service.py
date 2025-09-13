@@ -1014,6 +1014,32 @@ class AssessmentService:
                 }
             )
             
+            # Process achievements after successful submission
+            achievement_results = None
+            try:
+                from services.assessment.achievement_service import AchievementService
+                achievement_service = AchievementService()
+                achievement_results = achievement_service.process_assessment_completion(
+                    student_id, 
+                    assessment, 
+                    assessment_result
+                )
+                print(f"Achievement processing results: {achievement_results}")
+                
+                # Add achievement results to the assessment result
+                assessment_result["achievements"] = achievement_results
+                
+            except Exception as e:
+                print(f"Error processing achievements: {str(e)}")
+                # Don't fail the assessment submission if achievement processing fails
+                # Add empty achievement results to maintain consistent response structure
+                assessment_result["achievements"] = {
+                    "achievements_earned": [],
+                    "badges_updated": [],
+                    "streaks_updated": [],
+                    "errors": [f"Achievement processing error: {str(e)}"]
+                }
+            
             return assessment_result, 200
             
         except Exception as e:
@@ -1776,5 +1802,36 @@ class AssessmentService:
             return streak_info, 200
         except Exception as e:
             error_message = f"Error getting learning streak: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500
+
+    def get_assessment_statistics(self, student_id: str, days_back: Optional[int] = None) -> Tuple[Dict, int]:
+        """Get comprehensive assessment statistics for a student.
+        
+        Args:
+            student_id: ID of the student
+            days_back: Optional number of days to look back (if None, gets all-time stats)
+            
+        Returns:
+            Tuple of (statistics_data, status_code)
+        """
+        try:
+            # Calculate from_date if days_back is provided
+            from_date = None
+            if days_back and days_back > 0:
+                from datetime import timedelta
+                from_date = datetime.utcnow() - timedelta(days=days_back)
+            
+            # Get assessment statistics from repository
+            stats = self.history_repo.get_assessment_statistics(student_id, from_date)
+            
+            # Add metadata
+            if days_back:
+                stats["days_filter"] = days_back
+            
+            return stats, 200
+            
+        except Exception as e:
+            error_message = f"Error getting assessment statistics: {str(e)}"
             print(error_message)
             return {"message": error_message}, 500 
