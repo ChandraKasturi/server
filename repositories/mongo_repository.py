@@ -336,7 +336,7 @@ class QuestionRepository(MongoRepository):
         """Get collection for specific subject and topic using pattern x_{subject_name}_{topic_name}."""
         # Normalize subject and topic names (lowercase, replace spaces/hyphens with underscores)
         normalized_subject = subject.lower().replace(" ", "-").replace("_", "-")
-        normalized_topic = topic.lower().replace(" ", "-").replace("_", "-")
+        normalized_topic = topic.lower().replace(" ", "_").replace("-", "_")
         print(f"Normalized subject: {normalized_subject}")
         print(f"Normalized topic: {normalized_topic}")
         collection_name = f"x_{normalized_subject}_{normalized_topic}" if not normalized_subject.startswith("x_") else f"{normalized_subject}_{normalized_topic}"
