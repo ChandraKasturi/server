@@ -127,6 +127,7 @@ class AssessmentRequest(BaseModel):
     question_types: Optional[List[str]] = None  # List of types: ["MCQ", "DESCRIPTIVE", "FILL_BLANKS", "TRUEFALSE"]
     number_of_questions: Optional[int] = 5
     level: Optional[int] = 1
+    language: Optional[str] = "English"  # Language for assessment title (English or Hindi)
 
 # ========== EXACT RESPONSE SCHEMAS ==========
 
@@ -642,6 +643,17 @@ class QuestionsAnsweredInfo(BaseModel):
     """Questions answered count information"""
     total_questions_answered: int
     by_subject: Dict[str, int]
+    weekly_change: int
+    this_week_count: int
+    last_week_count: int
+    is_increase: bool
+    is_decrease: bool
+
+class LearningHoursInfo(BaseModel):
+    """Learning hours information"""
+    total_learning_hours: float
+    learning_hours_today: float
+    sessions_analyzed: int
 
 class EducationalQuote(BaseModel):
     """Educational quote with author"""
@@ -652,6 +664,7 @@ class LearningInfoResponse(BaseModel):
     """Response from learning-info endpoint"""
     learning_streak: LearningStreakInfo
     questions_answered: QuestionsAnsweredInfo
+    learning_hours: LearningHoursInfo
     educational_quote: EducationalQuote
     generated_at: str
     student_id: str

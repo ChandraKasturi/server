@@ -388,7 +388,17 @@ async def get_learning_info(
                 },
                 "questions_answered": {
                     "total_questions_answered": 0,
-                    "by_subject": {}
+                    "by_subject": {},
+                    "weekly_change": 0,
+                    "this_week_count": 0,
+                    "last_week_count": 0,
+                    "is_increase": False,
+                    "is_decrease": False
+                },
+                "learning_hours": {
+                    "total_learning_hours": 0.0,
+                    "learning_hours_today": 0.0,
+                    "sessions_analyzed": 0
                 },
                 "educational_quote": {
                     "quote": "Education is the passport to the future, for tomorrow belongs to those who prepare for it today.",
