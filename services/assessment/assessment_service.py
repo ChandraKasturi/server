@@ -10,7 +10,7 @@ from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from config import settings
-from repositories.mongo_repository import HistoryRepository, QuestionRepository
+from repositories.mongo_repository import HistoryRepository, QuestionRepository, generate_assessment_title
 from repositories.postgres_text_repository import PostgresTextRepository
 from repositories.pdf_repository import PDFRepository
 from services.langchain.langchain_service import LangchainService
@@ -37,7 +37,7 @@ class AssessmentService:
     def check_assessment_content(self, subject: str, topic: str = None, topics: List[str] = None, subtopic: Optional[str] = None, 
                             level: int = 1, num_questions: int = 5, 
                             session_id: Optional[str] = None, student_id: str = None,
-                            question_types: List[str] = None) -> Tuple[Dict, int]:
+                            question_types: List[str] = None, language: str = "English") -> Tuple[Dict, int]:
         """Generate assessment questions based on the provided parameters.
         
         Args:
@@ -51,6 +51,7 @@ class AssessmentService:
             student_id: ID of the student
             question_types: List of question types to generate (e.g., ["MCQ", "DESCRIPTIVE"])
                            If None or empty, defaults to ["MCQ"]
+            language: Language for assessment title (English or Hindi), defaults to English
             
         Returns:
             Tuple of (result_data, status_code)
@@ -174,8 +175,22 @@ class AssessmentService:
                         )
                         db_questions.extend(generated_questions)
             
+            # Map level to difficulty
+            level_to_difficulty = {1: "Easy", 2: "Easy", 3: "Medium", 4: "Hard", 5: "Hard"}
+            difficulty = level_to_difficulty.get(level, "Medium")
+            
+            # Generate assessment title
+            title = generate_assessment_title(
+                subject=subject,
+                topics=topic_list,
+                question_types=question_types,
+                difficulty=difficulty,
+                language=language
+            )
+            
             # Create assessment object
             assessment = {
+                "title": title,
                 "questions": db_questions,
                 "student_id": student_id,
                 "created_at": datetime.utcnow(),
@@ -183,7 +198,8 @@ class AssessmentService:
                 "question_types": question_types,
                 "subject": subject,
                 "topics": topic_list,  # Store all topics
-                "level": level
+                "level": level,
+                "difficulty": difficulty
             }
             
             # Store assessment

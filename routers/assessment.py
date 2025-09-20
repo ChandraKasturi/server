@@ -67,6 +67,7 @@ def generate_assessment(body: AssessmentRequest, request: Request, student_id: s
         level=body.level,
         num_questions=body.number_of_questions,
         question_types=body.question_types,
+        language=body.language,
         session_id=session_id,
         student_id=student_id
     )

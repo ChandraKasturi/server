@@ -779,6 +779,56 @@ class LearningService:
             print(error_message)
             return {"message": error_message}, 500
 
+    async def get_weekly_questions_change(self, student_id: str, subject: str = None) -> Tuple[Dict, int]:
+        """Get weekly change in questions answered for a student (async).
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional subject to filter by (if None, counts all subjects)
+            
+        Returns:
+            Tuple of (weekly_change_info, status_code)
+        """
+        try:
+            def _get_change_sync():
+                return self.history_repository.get_weekly_questions_change(student_id, subject)
+            
+            # Run the database operation in a thread pool
+            loop = asyncio.get_event_loop()
+            change_info = await loop.run_in_executor(self.thread_pool, _get_change_sync)
+            
+            return change_info, 200
+            
+        except Exception as e:
+            error_message = f"Error getting weekly questions change: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500
+
+    async def get_learning_hours(self, student_id: str, subject: str = None) -> Tuple[Dict, int]:
+        """Get learning hours for a student (async).
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional subject to filter by (if None, counts all subjects)
+            
+        Returns:
+            Tuple of (learning_hours_info, status_code)
+        """
+        try:
+            def _get_hours_sync():
+                return self.history_repository.get_learning_hours(student_id, subject)
+            
+            # Run the database operation in a thread pool
+            loop = asyncio.get_event_loop()
+            hours_info = await loop.run_in_executor(self.thread_pool, _get_hours_sync)
+            
+            return hours_info, 200
+            
+        except Exception as e:
+            error_message = f"Error getting learning hours: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500
+
     async def ensure_quotes_exist(self) -> bool:
         """Ensure that educational quotes exist in the database, generate if needed (async).
         
@@ -966,11 +1016,13 @@ class LearningService:
             # Get all the information in parallel
             streak_task = self.get_learning_streak(student_id, subject, count_ai_messages=False)
             questions_task = self.get_questions_answered_count(student_id, subject, from_date)
+            weekly_change_task = self.get_weekly_questions_change(student_id, subject)
+            learning_hours_task = self.get_learning_hours(student_id, subject)
             quote_task = self.get_random_educational_quote()
             
             # Wait for all tasks to complete
-            streak_result, questions_result, quote_result = await asyncio.gather(
-                streak_task, questions_task, quote_task, return_exceptions=True
+            streak_result, questions_result, weekly_change_result, learning_hours_result, quote_result = await asyncio.gather(
+                streak_task, questions_task, weekly_change_task, learning_hours_task, quote_task, return_exceptions=True
             )
             
             # Process results
@@ -994,6 +1046,32 @@ class LearningService:
                 learning_info["questions_answered"] = {
                     "total_questions_answered": 0,
                     "by_subject": {}
+                }
+            
+            # Handle weekly change result
+            if isinstance(weekly_change_result, tuple) and weekly_change_result[1] == 200:
+                # Add weekly change data to questions_answered section
+                weekly_change_data = weekly_change_result[0]
+                learning_info["questions_answered"]["weekly_change"] = weekly_change_data["weekly_change"]
+                learning_info["questions_answered"]["this_week_count"] = weekly_change_data["this_week_count"]
+                learning_info["questions_answered"]["last_week_count"] = weekly_change_data["last_week_count"]
+                learning_info["questions_answered"]["is_increase"] = weekly_change_data["is_increase"]
+                learning_info["questions_answered"]["is_decrease"] = weekly_change_data["is_decrease"]
+            else:
+                learning_info["questions_answered"]["weekly_change"] = 0
+                learning_info["questions_answered"]["this_week_count"] = 0
+                learning_info["questions_answered"]["last_week_count"] = 0
+                learning_info["questions_answered"]["is_increase"] = False
+                learning_info["questions_answered"]["is_decrease"] = False
+            
+            # Handle learning hours result
+            if isinstance(learning_hours_result, tuple) and learning_hours_result[1] == 200:
+                learning_info["learning_hours"] = learning_hours_result[0]
+            else:
+                learning_info["learning_hours"] = {
+                    "total_learning_hours": 0.0,
+                    "learning_hours_today": 0.0,
+                    "sessions_analyzed": 0
                 }
             
             # Handle quote result

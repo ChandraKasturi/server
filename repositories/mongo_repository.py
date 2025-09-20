@@ -933,6 +933,168 @@ class HistoryRepository(MongoRepository):
             "by_subject": by_subject
         }
 
+    def get_weekly_questions_change(self, student_id: str, subject: str = None) -> Dict[str, int]:
+        """Get weekly change in questions answered for a student.
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional subject to filter by (if None, counts all subjects)
+            
+        Returns:
+            Dictionary with weekly questions change information
+        """
+        try:
+            collection = self.get_collection(student_id, "sahasra_history")
+            
+            # Calculate date ranges
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            
+            # This week (last 7 days)
+            this_week_start = now - timedelta(days=7)
+            
+            # Last week (8-14 days ago)
+            last_week_start = now - timedelta(days=14)
+            last_week_end = now - timedelta(days=7)
+            
+            # Build base query for AI messages (questions answered by AI)
+            base_query = {"is_ai": True}
+            
+            if subject and subject.lower() != "all":
+                normalized_subject = subject.replace("-", "_").lower()
+                base_query["subject"] = {"$regex": f"^{normalized_subject}$", "$options": "i"}
+            
+            # Count questions this week
+            this_week_query = base_query.copy()
+            this_week_query["time"] = {"$gte": this_week_start}
+            this_week_count = len(list(collection.find(this_week_query)))
+            
+            # Count questions last week
+            last_week_query = base_query.copy()
+            last_week_query["time"] = {"$gte": last_week_start, "$lt": last_week_end}
+            last_week_count = len(list(collection.find(last_week_query)))
+            
+            # Calculate change
+            weekly_change = this_week_count - last_week_count
+            
+            print(f"Weekly questions change: this week={this_week_count}, last week={last_week_count}, change={weekly_change}")
+            
+            return {
+                "this_week_count": this_week_count,
+                "last_week_count": last_week_count,
+                "weekly_change": weekly_change,
+                "is_increase": weekly_change > 0,
+                "is_decrease": weekly_change < 0
+            }
+            
+        except Exception as e:
+            print(f"Error calculating weekly questions change: {str(e)}")
+            return {
+                "this_week_count": 0,
+                "last_week_count": 0,
+                "weekly_change": 0,
+                "is_increase": False,
+                "is_decrease": False
+            }
+
+    def get_learning_hours(self, student_id: str, subject: str = None) -> Dict[str, Any]:
+        """Calculate learning hours for a student based on session durations.
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional subject to filter by (if None, counts all subjects)
+            
+        Returns:
+            Dictionary with learning hours information
+        """
+        try:
+            collection = self.get_collection(student_id, "sahasra_history")
+            
+            # Build query for user messages (learning sessions)
+            query = {"is_ai": False}
+            
+            if subject and subject.lower() != "all":
+                normalized_subject = subject.replace("-", "_").lower()
+                query["subject"] = {"$regex": f"^{normalized_subject}$", "$options": "i"}
+            
+            # Get all user messages grouped by session and date
+            pipeline = [
+                {"$match": query},
+                {
+                    "$addFields": {
+                        "date_only": {
+                            "$dateToString": {
+                                "format": "%Y-%m-%d",
+                                "date": "$time"
+                            }
+                        }
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": {
+                            "session_id": "$session_id",
+                            "date": "$date_only"
+                        },
+                        "messages": {"$push": "$$ROOT"},
+                        "first_message_time": {"$min": "$time"},
+                        "last_message_time": {"$max": "$time"},
+                        "message_count": {"$sum": 1}
+                    }
+                },
+                {
+                    "$sort": {"first_message_time": 1}
+                }
+            ]
+            
+            session_groups = list(collection.aggregate(pipeline))
+            
+            total_hours = 0.0
+            today_hours = 0.0
+            today_date = datetime.utcnow().strftime("%Y-%m-%d")
+            
+            for group in session_groups:
+                # Calculate session duration
+                first_time = group["first_message_time"]
+                last_time = group["last_message_time"]
+                message_count = group["message_count"]
+                session_date = group["_id"]["date"]
+                
+                # Estimate session duration
+                if message_count == 1:
+                    # Single message: assume 2 minutes of learning
+                    session_duration_minutes = 2
+                else:
+                    # Multiple messages: calculate actual duration + some reading time
+                    duration_seconds = (last_time - first_time).total_seconds()
+                    session_duration_minutes = max(duration_seconds / 60, message_count * 1.5)  # Minimum 1.5 min per message
+                
+                # Cap maximum session duration at 3 hours (180 minutes)
+                session_duration_minutes = min(session_duration_minutes, 180)
+                session_hours = session_duration_minutes / 60
+                
+                total_hours += session_hours
+                
+                # Add to today's hours if it's today
+                if session_date == today_date:
+                    today_hours += session_hours
+            
+            print(f"Learning hours calculated: total={total_hours:.2f}, today={today_hours:.2f}")
+            
+            return {
+                "total_learning_hours": round(total_hours, 2),
+                "learning_hours_today": round(today_hours, 2),
+                "sessions_analyzed": len(session_groups)
+            }
+            
+        except Exception as e:
+            print(f"Error calculating learning hours: {str(e)}")
+            return {
+                "total_learning_hours": 0.0,
+                "learning_hours_today": 0.0,
+                "sessions_analyzed": 0
+            }
+
     def get_assessment_statistics(self, student_id: str, from_date: datetime = None) -> Dict[str, Any]:
         """Get comprehensive assessment statistics for a student.
         
@@ -1404,6 +1566,123 @@ class AchievementRepository(MongoRepository):
         }
         
         return list(assessments_collection.find(query).sort("last_submission_time", 1))
+
+def generate_assessment_title(subject: str, topics: List[str] = None, question_types: List[str] = None, 
+                             difficulty: str = "Medium", language: str = "English") -> str:
+    """Generate a structured title for assessments based on subject, topics, question types, difficulty, and language.
+    
+    Args:
+        subject: Subject name (one of the five main subjects)
+        topics: List of topics (e.g., ["Algebraic Expressions", "Linear Equations"])
+        question_types: List of question types (e.g., ["MCQ", "FILL_BLANKS"])
+        difficulty: Difficulty level (Easy, Medium, Hard)
+        language: Language for the title (English or Hindi)
+        
+    Returns:
+        Formatted assessment title following the pattern:
+        {{SUBJECT}} – {{TOPIC(s)}} ({{DIFFICULTY}}, {{QUESTION_TYPES|short}})
+    """
+    # Normalize inputs
+    if not topics:
+        topics = []
+    if not question_types:
+        question_types = ["MCQ"]
+    
+    # Clean and normalize subject name
+    subject = subject.replace("x_", "").replace("_", " ").title()
+    
+    # Handle topics formatting
+    if len(topics) == 0:
+        if language == "Hindi":
+            topic_part = "सामान्य अभ्यास"
+        else:
+            topic_part = "General Practice"
+    elif len(topics) == 1:
+        topic_part = topics[0]
+    elif len(topics) == 2:
+        if language == "Hindi":
+            topic_part = f"{topics[0]} व {topics[1]}"
+        else:
+            topic_part = f"{topics[0]} & {topics[1]}"
+    else:  # 3 or more topics
+        if language == "Hindi":
+            topic_part = f"{topics[0]}, {topics[1]} व अन्य"
+        else:
+            topic_part = f"{topics[0]}, {topics[1]} & more"
+    
+    # Handle question types formatting
+    # Map question types to short forms
+    '''type_mapping = {
+        "MCQ": "MCQ",
+        "FILL_BLANKS": "FITB", 
+        "TRUEFALSE": "T/F",
+        "VERY_SHORT_ANSWER": "VS",
+        "SHORT_ANSWER": "SA",
+        "LONG_ANSWER": "SA",
+        "CASE_STUDY": "SA",
+        "DESCRIPTIVE": "SA"
+    }
+    
+    # Convert to short forms
+    short_types = []
+    for qtype in question_types:
+        qtype_upper = qtype.upper()
+        if qtype_upper in type_mapping:
+            short_form = type_mapping[qtype_upper]
+            if short_form not in short_types:  # Avoid duplicates
+                short_types.append(short_form)
+        else:
+            # Fallback for unknown types
+            short_types.append(qtype[:3].upper())
+    
+    # Format question types based on count
+    if len(short_types) == 1:
+        if language == "Hindi":
+            qtype_part = short_types[0]
+        else:
+            qtype_part = short_types[0]
+    elif len(short_types) == 2:
+        if language == "Hindi":
+            qtype_part = f"{short_types[0]} व {short_types[1]}"
+        else:
+            qtype_part = f"{short_types[0]} & {short_types[1]}"
+    else:  # 3 or more types
+        if language == "Hindi":
+            qtype_part = "मिश्रित प्रश्न"
+        else:
+            qtype_part = "Mixed Qs"'''
+    
+    # Handle difficulty translation
+    if language == "Hindi":
+        difficulty_map = {
+            "Easy": "आसान",
+            "Medium": "मध्यम", 
+            "Hard": "कठिन"
+        }
+        difficulty_text = difficulty_map.get(difficulty, difficulty)
+        
+        # For Hindi subjects, translate the subject name if it's one of the main subjects
+        if subject.lower() in ["hindi", "हिंदी"]:
+            subject = "हिंदी"
+        elif subject.lower() in ["mathematics", "गणित"]:
+            subject = "गणित"
+        elif subject.lower() in ["science", "विज्ञान"]:
+            subject = "विज्ञान"
+        elif subject.lower() in ["social science", "सामाजिक विज्ञान"]:
+            subject = "सामाजिक विज्ञान"
+        elif subject.lower() in ["english", "अंग्रेजी"]:
+            subject = "अंग्रेजी"
+    else:
+        difficulty_text = difficulty
+    
+    # Construct the final title
+    if language == "Hindi":
+        title = f"{subject} – {topic_part} ({difficulty_text})"
+    else:
+        title = f"{subject} – {topic_part} ({difficulty_text})"
+    
+    return title
+
 
 class QuotesRepository(MongoRepository):
     """Repository for educational quotes operations."""
