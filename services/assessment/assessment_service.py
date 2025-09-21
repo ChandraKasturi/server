@@ -220,7 +220,8 @@ class AssessmentService:
             return {
                 "message": "Assessment generated successfully",
                 "assessment_id": assessment_id,
-                "questions": filtered_questions
+                "questions": filtered_questions,
+                "title": title
             }, 200
             
         except Exception as e:
