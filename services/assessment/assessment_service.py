@@ -1791,7 +1791,7 @@ class AssessmentService:
                       "question_type", "subject", "topic", "subtopic", "level", "questionset", 
                       "marks", "created_at", "_id", "id", 
                       "expected_length", "scenario_type", "pdf_id", "generated_at", "image_url", 
-                      "image_caption", "has_image"]
+                      "image_caption", "has_image","title"]
         
         for q in questions:
             filtered_q = {}
