@@ -244,6 +244,7 @@ class AchievementProcessingResult(BaseModel):
 
 class AssessmentSubmissionResponse(BaseModel):
     """Response from submit_assessment service"""
+    title: str
     results: List[AssessmentSubmissionResultItem]
     correct_count: int
     total_questions: int

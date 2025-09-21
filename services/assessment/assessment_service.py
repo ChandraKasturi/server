@@ -732,6 +732,7 @@ class AssessmentService:
                 
             # Get questions from the assessment
             assessment_questions = assessment.get("questions", [])
+            assessment_title = assessment.get("title", "")
             print(f"Assessment questions: {assessment_questions}")
             
             # Create a dictionary of questions by ID for faster lookup
@@ -1005,6 +1006,7 @@ class AssessmentService:
             # Create result object
             assessment_result = {
                 "assessment_id": assessment_id,
+                "title": assessment_title,
                 "student_id": student_id,
                 "submission_time": datetime.utcnow(),
                 "results": results,
@@ -1116,6 +1118,7 @@ class AssessmentService:
                 # Create filtered assessment with only required fields
                 filtered_assessment = {
                     '_id': assessment.get('_id'),
+                    'title': assessment.get('title'),
                     'subject': assessment.get('subject'),
                     'topics': topics,
                     'level': assessment.get('level'),
