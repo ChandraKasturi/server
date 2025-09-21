@@ -224,6 +224,7 @@ class AssessmentGenerationResponse(BaseModel):
     message: str
     assessment_id: str
     questions: List[AssessmentQuestion]
+    title: str
 
 class AssessmentSubmissionResultItem(BaseModel):
     """Individual result item from assessment submission"""
