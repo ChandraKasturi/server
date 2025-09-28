@@ -827,3 +827,110 @@ async def learn_subject(
             content={"answer": f"Error learning {subject}: {str(e)}"},
             status_code=500
         )
+
+@router.get("/learning-achievements")
+async def get_learning_achievements(
+    request: Request,
+    x_auth_session: Optional[str] = Header(None),
+    user_id: str = Depends(auth_middleware),
+    achievement_type: Optional[str] = Query(None, description="Optional filter by achievement type (learning, consistency, milestone)")
+):
+    """Get learning achievements for a student.
+    
+    This endpoint returns all learning-related achievements earned by the student.
+    Achievement types include: learning, consistency, milestone.
+    
+    Args:
+        request: FastAPI request object
+        x_auth_session: JWT token for authentication
+        user_id: User ID extracted from JWT token
+        achievement_type: Optional filter by achievement type
+        
+    Returns:
+        UGJSONResponse with learning achievements list and summary statistics
+    """
+    try:
+        achievements_data, status_code = await learning_service.get_student_learning_achievements(
+            user_id, achievement_type
+        )
+        
+        return UGJSONResponse(
+            content=achievements_data,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"message": f"Error getting learning achievements: {str(e)}"},
+            status_code=500
+        )
+
+@router.get("/learning-badges")
+async def get_learning_badges(
+    request: Request,
+    x_auth_session: Optional[str] = Header(None),
+    user_id: str = Depends(auth_middleware),
+    subject: Optional[str] = Query(None, description="Optional filter by subject")
+):
+    """Get learning badges for a student.
+    
+    This endpoint returns all learning-related badges earned by the student.
+    Badge types include: subject_engagement, learning_streak, question_mastery.
+    
+    Args:
+        request: FastAPI request object
+        x_auth_session: JWT token for authentication
+        user_id: User ID extracted from JWT token
+        subject: Optional filter by subject
+        
+    Returns:
+        UGJSONResponse with learning badges list and summary statistics
+    """
+    try:
+        badges_data, status_code = await learning_service.get_student_learning_badges(
+            user_id, subject
+        )
+        
+        return UGJSONResponse(
+            content=badges_data,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"message": f"Error getting learning badges: {str(e)}"},
+            status_code=500
+        )
+
+@router.get("/learning-streaks")
+async def get_learning_streaks(
+    request: Request,
+    x_auth_session: Optional[str] = Header(None),
+    user_id: str = Depends(auth_middleware)
+):
+    """Get learning streaks for a student.
+    
+    This endpoint returns all learning-related streaks (daily, subject-specific) for the student
+    with current and historical streak information.
+    
+    Args:
+        request: FastAPI request object
+        x_auth_session: JWT token for authentication
+        user_id: User ID extracted from JWT token
+        
+    Returns:
+        UGJSONResponse with organized learning streak information
+    """
+    try:
+        streaks_data, status_code = await learning_service.get_student_learning_streaks(user_id)
+        
+        return UGJSONResponse(
+            content=streaks_data,
+            status_code=status_code
+        )
+        
+    except Exception as e:
+        return UGJSONResponse(
+            content={"message": f"Error getting learning streaks: {str(e)}"},
+            status_code=500
+        )
