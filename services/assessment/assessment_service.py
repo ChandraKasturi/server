@@ -1096,7 +1096,7 @@ class AssessmentService:
                 from_date = datetime.utcnow() - timedelta(weeks=6)'''
             
             # Get assessments
-            assessments = self.history_repo.get_assessments(student_id, from_date, subject, topic) if from_date else self.history_repo.get_assessments(student_id, subject, topic)
+            assessments = self.history_repo.get_assessments(student_id, from_date, subject, topic)
             
             # Filter and restructure assessments to include only specific fields
             filtered_assessments = []
