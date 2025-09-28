@@ -30,6 +30,7 @@ import PIL.Image
 from config import settings
 from repositories.pdf_repository import PDFRepository
 from repositories.mongo_repository import HistoryRepository, QuotesRepository, QuestionRepository
+from services.learning.learning_achievement_service import LearningAchievementService
 
 class LearningService:
     """Service for subject-specific learning using RAG."""
@@ -73,6 +74,7 @@ class LearningService:
         self.history_repository = HistoryRepository()
         self.quotes_repository = QuotesRepository()
         self.question_repository = QuestionRepository()
+        self.learning_achievement_service = LearningAchievementService()
         # Thread pool for blocking operations
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
     
@@ -306,6 +308,26 @@ class LearningService:
         # Run the database operation in a thread pool
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self.thread_pool, _store_history_sync)
+
+    async def _process_learning_achievements_async(self, student_id: str, interaction_data: Dict) -> None:
+        """Async version of processing learning achievements.
+        
+        Args:
+            student_id: ID of the student
+            interaction_data: Learning interaction data
+        """
+        def _process_achievements_sync():
+            return self.learning_achievement_service.process_learning_interaction(student_id, interaction_data)
+        
+        # Run the achievement processing in a thread pool
+        loop = asyncio.get_event_loop()
+        try:
+            achievement_results = await loop.run_in_executor(self.thread_pool, _process_achievements_sync)
+            # Log achievement results for debugging
+            if achievement_results.get("achievements_earned") or achievement_results.get("badges_updated"):
+                print(f"Learning achievements processed for {student_id}: {achievement_results}")
+        except Exception as e:
+            print(f"Error processing learning achievements: {str(e)}")
 
     def _process_base64_image(self, base64_data: str, field_name: str) -> str:
         """Process base64 image data and save it to static directory.
@@ -627,6 +649,9 @@ class LearningService:
                 "session_id": session_id
             }
             await self._store_history_async(student_id, user_history_data)
+            
+            # Process learning achievements for user question
+            await self._process_learning_achievements_async(student_id, user_history_data)
             
             # Store AI response with image info
             ai_response_text = answer
@@ -2292,4 +2317,78 @@ class LearningService:
                 
         except Exception as e:
             print(f"Error storing learning image caption in vector database: {str(e)}")
-            return False 
+            return False
+
+    async def get_student_learning_achievements(self, student_id: str, achievement_type: str = None) -> Tuple[Dict, int]:
+        """Get learning achievements for a student (async).
+        
+        Args:
+            student_id: ID of the student
+            achievement_type: Optional filter by achievement type
+            
+        Returns:
+            Tuple of (achievements_data, status_code)
+        """
+        try:
+            def _get_achievements_sync():
+                return self.learning_achievement_service.get_student_learning_achievements(student_id, achievement_type)
+            
+            # Run the database operation in a thread pool
+            loop = asyncio.get_event_loop()
+            achievements_data, status_code = await loop.run_in_executor(self.thread_pool, _get_achievements_sync)
+            
+            return achievements_data, status_code
+            
+        except Exception as e:
+            error_message = f"Error getting learning achievements: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500
+
+    async def get_student_learning_badges(self, student_id: str, subject: str = None) -> Tuple[Dict, int]:
+        """Get learning badges for a student (async).
+        
+        Args:
+            student_id: ID of the student
+            subject: Optional filter by subject
+            
+        Returns:
+            Tuple of (badges_data, status_code)
+        """
+        try:
+            def _get_badges_sync():
+                return self.learning_achievement_service.get_student_learning_badges(student_id, subject)
+            
+            # Run the database operation in a thread pool
+            loop = asyncio.get_event_loop()
+            badges_data, status_code = await loop.run_in_executor(self.thread_pool, _get_badges_sync)
+            
+            return badges_data, status_code
+            
+        except Exception as e:
+            error_message = f"Error getting learning badges: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500
+
+    async def get_student_learning_streaks(self, student_id: str) -> Tuple[Dict, int]:
+        """Get learning streaks for a student (async).
+        
+        Args:
+            student_id: ID of the student
+            
+        Returns:
+            Tuple of (streaks_data, status_code)
+        """
+        try:
+            def _get_streaks_sync():
+                return self.learning_achievement_service.get_student_learning_streaks(student_id)
+            
+            # Run the database operation in a thread pool
+            loop = asyncio.get_event_loop()
+            streaks_data, status_code = await loop.run_in_executor(self.thread_pool, _get_streaks_sync)
+            
+            return streaks_data, status_code
+            
+        except Exception as e:
+            error_message = f"Error getting learning streaks: {str(e)}"
+            print(error_message)
+            return {"message": error_message}, 500

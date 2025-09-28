@@ -1125,6 +1125,7 @@ class HistoryRepository(MongoRepository):
         completed_assessments = 0
         total_score = 0
         total_submissions = 0
+        highest_score = 0
         by_subject = {}
         
         # Process each assessment
@@ -1138,6 +1139,8 @@ class HistoryRepository(MongoRepository):
                 if "score_percentage" in last_submission:
                     score = last_submission["score_percentage"]
                     total_score += score
+                    # Update highest score
+                    highest_score = max(highest_score, score)
                 
                 # Count submission
                 submission_count = assessment.get("submission_count", 1)
@@ -1151,11 +1154,13 @@ class HistoryRepository(MongoRepository):
                         "completed_assessments": 0,
                         "total_score": 0,
                         "average_score": 0,
+                        "highest_score": 0,
                         "total_submissions": 0
                     }
                 
                 by_subject[subject]["completed_assessments"] += 1
                 by_subject[subject]["total_score"] += score
+                by_subject[subject]["highest_score"] = max(by_subject[subject]["highest_score"], score)
                 by_subject[subject]["total_submissions"] += submission_count
             
             # Count total assessments by subject
@@ -1166,6 +1171,7 @@ class HistoryRepository(MongoRepository):
                     "completed_assessments": 0,
                     "total_score": 0,
                     "average_score": 0,
+                    "highest_score": 0,
                     "total_submissions": 0
                 }
             by_subject[subject]["total_assessments"] += 1
@@ -1184,6 +1190,7 @@ class HistoryRepository(MongoRepository):
             "total_assessments": total_assessments,
             "completed_assessments": completed_assessments,
             "average_score": round(overall_average_score, 2),
+            "highest_score": round(highest_score, 2),
             "total_submissions": total_submissions,
             "by_subject": by_subject,
             "assessment_streak": assessment_streak
