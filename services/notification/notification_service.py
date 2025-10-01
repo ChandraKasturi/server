@@ -159,7 +159,7 @@ class NotificationService:
         Returns:
             True if successful, False otherwise
         """
-        message = f"Your Sahasra signup OTP is {token}. Please enter this code to verify your mobile number. The code is valid for 10 minutes. Do not share"
+        message = f"Your Sahasra signup OTP is {token}. Please enter this code to verify your mobile number. The code is valid for 10 minutes. Do not share it with anyone."
         
         return self.send_sms(
             phone_number, 
