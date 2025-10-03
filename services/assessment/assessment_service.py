@@ -743,29 +743,71 @@ class AssessmentService:
                 if q_id:
                     questions_by_id[q_id] = q
             
-            # Process each answer
-            results = []
-            correct_count = 0
-            total_questions = len(student_answers)
-            
+            # Create a dictionary of student answers by question ID for faster lookup
+            student_answers_by_id = {}
             for answer_data in student_answers:
                 question_id = answer_data.questionid
                 student_answer = answer_data.studentanswer
+                student_answers_by_id[question_id] = student_answer
+            
+            # Process all questions in the assessment
+            results = []
+            correct_count = 0
+            total_questions = len(assessment_questions)  # Count all questions in assessment
+            
+            for question in assessment_questions:
+                # Get question ID
+                question_id = str(question.get("id", "")) or str(question.get("_id", ""))
                 
-                # Skip questions without answers
+                # Get student's answer for this question (may be None/empty)
+                student_answer = student_answers_by_id.get(question_id, None)
+                
+                # If no answer provided or answer is empty, mark as unanswered
                 if not student_answer:
-                    continue
-                
-                # Find the question in the assessment
-                question = questions_by_id.get(question_id)
-                
-                if not question:
-                    # Question not found in this assessment
+                    # Include unanswered question in results
                     result = {
                         "questionid": question_id,
                         "is_correct": False,
-                        "feedback": f"Question not found in assessment {assessment_id}"
+                        "feedback": "Question not answered",
+                        "student_answer": "",  # Empty string for unanswered questions
+                        "question": question.get("question", ""),
+                        "question_type": question.get("question_type", "MCQ")
                     }
+                    
+                    # Add sensitive fields that were hidden during generation
+                    if "model_answer" in question:
+                        result["model_answer"] = question["model_answer"]
+                    
+                    if "grading_criteria" in question:
+                        result["grading_criteria"] = question["grading_criteria"]
+                        
+                    if "explaination" in question:
+                        result["explaination"] = question["explaination"]
+                        
+                    # For MCQ questions, include options and correct answer
+                    if question.get("question_type") == "MCQ":
+                        for i in range(1, 5):
+                            option_key = f"option{i}"
+                            if option_key in question:
+                                result[option_key] = question[option_key]
+                        if "correctanswer" in question:
+                            result["correctanswer"] = question["correctanswer"]
+                    
+                    # For FILL_BLANKS questions, include answers
+                    elif question.get("question_type") == "FILL_BLANKS":
+                        if "answers" in question:
+                            result["answers"] = question["answers"]
+                    
+                    # For TRUEFALSE questions, include correct answer
+                    elif question.get("question_type") == "TRUEFALSE":
+                        if "correctanswer" in question:
+                            result["correctanswer"] = question["correctanswer"]
+                    
+                    # Store unanswered status in the question object
+                    question["student_answer"] = ""
+                    question["is_correct"] = False
+                    question["feedback"] = "Question not answered"
+                    
                     results.append(result)
                     continue
                 
