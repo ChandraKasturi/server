@@ -100,7 +100,7 @@ class AssessmentService:
                     base_query["subtopic"] = subtopic
                     
                 if level:
-                    base_query["level"] = str(level)
+                    base_query["level"] = int(level)
                 
                 # If we have only one question type, fetch all questions of that type
                 if len(question_types) == 1:
