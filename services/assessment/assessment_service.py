@@ -1834,7 +1834,7 @@ class AssessmentService:
         filtered_questions = []
         # Define fields that are safe to send in generation response
         safe_fields = ["question", "option1", "option2", "option3", "option4", 
-                      "question_type", "subject", "topic", "subtopic", "level", "questionset", 
+                      "question_type","question_image", "subject", "topic", "subtopic", "level", "questionset", 
                       "marks", "created_at", "_id", "id", 
                       "expected_length", "scenario_type", "pdf_id", "generated_at", "image_url", 
                       "image_caption", "has_image","title"]
