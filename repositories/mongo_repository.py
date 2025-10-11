@@ -340,6 +340,7 @@ class QuestionRepository(MongoRepository):
         print(f"Normalized subject: {normalized_subject}")
         print(f"Normalized topic: {normalized_topic}")
         collection_name = f"x-{normalized_subject}-{normalized_topic}" if not normalized_subject.startswith("x-") else f"{normalized_subject}-{normalized_topic}"
+        print(f"Collection name: {collection_name}")
         return self.get_collection(settings.MONGO_DATABASE_QUESTIONS, collection_name)
     
     def insert_question(self, question_data: Dict) -> bool:
@@ -368,7 +369,7 @@ class QuestionRepository(MongoRepository):
             # Use the default collection and include subject/topic in query if present
             collection = self.questions_collection
             filtered_query = query
-            
+        print(f"Filtered query: {filtered_query}")
         return list(collection.find(filtered_query).limit(limit))
     
     def get_all_topics_subtopics(self) -> List[Dict]:
