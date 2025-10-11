@@ -154,7 +154,7 @@ class AssessmentService:
                             )
                             
                             db_questions.extend(type_questions)
-            
+            print(f"DB QUESTIONS {db_questions}")
             # If not enough questions, generate some using LLM
             if len(db_questions) < num_questions:
                 # Number of questions to generate
