@@ -214,12 +214,19 @@ class PDFProcessingService:
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
         
     async def process_queued_pdfs(self):
-        """Process all queued PDFs asynchronously using Redis queue."""
+        """Process all queued PDFs asynchronously using Redis queue with retry logic."""
+        retry_count = 0
+        max_retries = settings.REDIS_MAX_RETRIES
+        retry_delay = settings.REDIS_RETRY_DELAY
+        
         while True:
             try:
                 print(f"Redis Client: {self.redis_client}")
                 # Get the highest priority task from Redis sorted set
                 tasks = await self.redis_client.zpopmax("pdf_processing_queue", 1)
+                
+                # Reset retry count on successful operation
+                retry_count = 0
                 
                 if not tasks:
                     # No PDFs in queue, wait before checking again
@@ -259,9 +266,26 @@ class PDFProcessingService:
                 # Spawn a new task for processing
                 asyncio.create_task(self._process_with_semaphore(pdf_document, user_id))
                 
+            except (ConnectionError, TimeoutError) as e:
+                # Redis connection errors - implement retry logic
+                retry_count += 1
+                if retry_count >= max_retries:
+                    print(f"✗ Redis connection failed after {max_retries} attempts: {str(e)}")
+                    print(f"  Resetting retry count and continuing...")
+                    retry_count = 0
+                    wait_time = retry_delay * 10  # Wait longer after max retries
+                else:
+                    wait_time = retry_delay * (2 ** retry_count)  # Exponential backoff
+                    print(f"⚠ Redis connection error (attempt {retry_count}/{max_retries}): {str(e)}")
+                    print(f"  Retrying in {wait_time} seconds...")
+                
+                await asyncio.sleep(wait_time)
+                
             except Exception as e:
-                print(f"Error in PDF processing worker: {str(e)}")
-                await asyncio.sleep(5)  # Wait before retrying
+                # Non-connection errors
+                print(f"✗ Error in PDF processing worker: {str(e)}")
+                retry_count = 0  # Reset retry count for non-connection errors
+                await asyncio.sleep(5)  # Wait before continuing
     
     async def _process_with_semaphore(self, pdf_document: PDFDocument, user_id: str):
         """Process a PDF document with worker concurrency control.

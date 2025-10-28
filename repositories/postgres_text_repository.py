@@ -1,4 +1,5 @@
 import psycopg2
+from psycopg2 import pool
 import uuid
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -15,7 +16,7 @@ class PostgresTextRepository:
     """
     
     def __init__(self, base_connection_string: Optional[str] = None):
-        """Initialize the PostgreSQL text repository.
+        """Initialize the PostgreSQL text repository with connection pooling.
         
         Args:
             base_connection_string: Base connection string for PostgreSQL.
@@ -24,6 +25,11 @@ class PostgresTextRepository:
         self.base_connection_string = base_connection_string or settings.PGVECTOR_CONNECTION_STRING
         # Parse the base connection string to extract components
         self._parse_connection_string()
+        self._connection_pools: Dict[str, pool.ThreadedConnectionPool] = {}
+        
+        print(f"✓ PostgreSQL Text Repository initialized")
+        print(f"  Host: {self.host}:{self.port}")
+        print(f"  Base DB: {self.base_db}")
         
     def _parse_connection_string(self):
         """Parse the connection string to extract components."""
@@ -83,6 +89,69 @@ class PostgresTextRepository:
         # Replace the database name in the connection string
         base_parts[-1] = f"student_{safe_student_id}"
         return '/'.join(base_parts)
+    
+    def _get_connection_pool(self, student_id: str) -> pool.ThreadedConnectionPool:
+        """Get or create a connection pool for a specific student database.
+        
+        Args:
+            student_id: ID of the student
+            
+        Returns:
+            Connection pool for the student database
+        """
+        if student_id not in self._connection_pools:
+            # Create a new connection pool for this student
+            conn_params = self._get_connection_params(student_id)
+            
+            try:
+                self._connection_pools[student_id] = pool.ThreadedConnectionPool(
+                    minconn=2,  # Minimum connections in pool
+                    maxconn=10, # Maximum connections in pool
+                    host=conn_params['host'],
+                    port=conn_params['port'],
+                    user=conn_params['user'],
+                    password=conn_params['password'],
+                    dbname=conn_params['dbname'],
+                    connect_timeout=settings.POSTGRES_CONNECT_TIMEOUT,
+                    options=f'-c statement_timeout={settings.POSTGRES_STATEMENT_TIMEOUT}'
+                )
+                print(f"✓ Created connection pool for student database: {conn_params['dbname']}")
+            except Exception as e:
+                print(f"✗ Failed to create connection pool for {student_id}: {e}")
+                raise
+        
+        return self._connection_pools[student_id]
+    
+    def _get_pooled_connection(self, student_id: str):
+        """Get a connection from the pool for a specific student.
+        
+        Args:
+            student_id: ID of the student
+            
+        Returns:
+            Database connection from pool
+        """
+        pool_obj = self._get_connection_pool(student_id)
+        return pool_obj.getconn()
+    
+    def _return_connection(self, student_id: str, conn):
+        """Return a connection to the pool.
+        
+        Args:
+            student_id: ID of the student
+            conn: Connection to return
+        """
+        if student_id in self._connection_pools:
+            self._connection_pools[student_id].putconn(conn)
+    
+    def close_all_pools(self):
+        """Close all connection pools."""
+        for student_id, pool_obj in self._connection_pools.items():
+            try:
+                pool_obj.closeall()
+                print(f"✓ Closed connection pool for student: {student_id}")
+            except Exception as e:
+                print(f"✗ Error closing pool for {student_id}: {e}")
     
     def _create_student_database(self, student_id: str) -> bool:
         """Create a database for a specific student if it doesn't exist.

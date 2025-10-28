@@ -1,6 +1,7 @@
 import uuid
 from typing import List, Optional, Any, Dict
 import psycopg2
+from psycopg2 import pool
 from langchain.embeddings import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.vectorstores import PGVector
@@ -16,7 +17,7 @@ class PgVectorRepository:
     """
     
     def __init__(self, table: str, openai_api_key: Optional[str] = None):
-        """Initialize PostgreSQL vector store.
+        """Initialize PostgreSQL vector store with connection pooling.
         
         Args:
             table: The table name to store vectors in
@@ -51,7 +52,9 @@ class PgVectorRepository:
                 'port': port,
                 'user': user,
                 'password': password,
-                'dbname': db
+                'dbname': db,
+                'connect_timeout': settings.POSTGRES_CONNECT_TIMEOUT,
+                'options': f'-c statement_timeout={settings.POSTGRES_STATEMENT_TIMEOUT}'
             }
         else:
             # Fallback for direct connection params
@@ -60,10 +63,20 @@ class PgVectorRepository:
                 'port': '5432',
                 'user': 'myuser',
                 'password': 'mypassword',
-                'dbname': 'cbse_x'
+                'dbname': 'cbse_x',
+                'connect_timeout': settings.POSTGRES_CONNECT_TIMEOUT
             }
         
-        self.conn = psycopg2.connect(**self.connection_params)
+        # Create connection pool instead of single connection
+        self.connection_pool = pool.ThreadedConnectionPool(
+            minconn=settings.POSTGRES_POOL_SIZE // 4,  # Min 25% of pool size
+            maxconn=settings.POSTGRES_POOL_SIZE,
+            **self.connection_params
+        )
+        
+        print(f"✓ PgVector Repository initialized with connection pool")
+        print(f"  Table: {self.table}")
+        print(f"  DB: {self.connection_params['dbname']}")
         
     def add_documents(self, documents: List[Document]) -> List[str]:
         """Add documents to the vector store.
@@ -76,18 +89,24 @@ class PgVectorRepository:
         """
         doc_ids = [str(uuid.uuid4()) for _ in documents]
         
-        with self.conn.cursor() as cur:
-            for i, doc in enumerate(documents):
-                # Generate embedding for the document
-                embedding_vector = self.embeddings.embed_documents([doc.page_content])[0]
-                
-                # Insert document with its embedding
-                cur.execute(
-                    f"INSERT INTO {self.table} (id, content, embedding) VALUES (%s, %s, %s)",
-                    (doc_ids[i], doc.page_content, embedding_vector)
-                )
-                
-            self.conn.commit()
+        # Get connection from pool
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                for i, doc in enumerate(documents):
+                    # Generate embedding for the document
+                    embedding_vector = self.embeddings.embed_documents([doc.page_content])[0]
+                    
+                    # Insert document with its embedding
+                    cur.execute(
+                        f"INSERT INTO {self.table} (id, content, embedding) VALUES (%s, %s, %s)",
+                        (doc_ids[i], doc.page_content, embedding_vector)
+                    )
+                    
+                conn.commit()
+        finally:
+            # Return connection to pool
+            self.connection_pool.putconn(conn)
             
         return doc_ids
     
@@ -105,17 +124,24 @@ class PgVectorRepository:
         # Generate embedding for the query
         query_vector = self.embeddings.embed_query(query_text)
         
-        with self.conn.cursor() as cur:
-            cur.execute(
-                f"SELECT * FROM match_{self.table}(%s::vector, %s::int, %s::jsonb);",
-                (query_vector, match_count, filter_json)
-            )
-            return cur.fetchall()
+        # Get connection from pool
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT * FROM match_{self.table}(%s::vector, %s::int, %s::jsonb);",
+                    (query_vector, match_count, filter_json)
+                )
+                return cur.fetchall()
+        finally:
+            # Return connection to pool
+            self.connection_pool.putconn(conn)
     
     def close(self):
-        """Close the database connection."""
-        if self.conn:
-            self.conn.close()
+        """Close all connections in the pool."""
+        if self.connection_pool:
+            self.connection_pool.closeall()
+            print(f"✓ Closed connection pool for PgVector table: {self.table}")
 
 class LangchainVectorRepository:
     """Repository for vector operations using LangChain's PGVector.

@@ -11,6 +11,7 @@ from models.pdf_models import (
     LearningSession, LearningInteraction
 )
 from repositories.mongo_repository import MongoRepository
+from repositories.decorators import mongo_retry
 
 
 class PDFRepository(MongoRepository):
@@ -33,6 +34,7 @@ class PDFRepository(MongoRepository):
         self.processing_queue.create_index([("status", pymongo.ASCENDING)])
         self.processing_queue.create_index([("priority", pymongo.DESCENDING)])
         
+    @mongo_retry(max_retries=3, delay=1)
     def save_pdf_document(self, pdf_document: PDFDocument) -> str:
         """Save a PDF document to the database.
         
@@ -79,6 +81,7 @@ class PDFRepository(MongoRepository):
         docs = list(self.pdf_documents.find(query))
         return [PDFDocument(**doc) for doc in docs]
     
+    @mongo_retry(max_retries=3, delay=1)
     def update_pdf_status(self, pdf_id: str, status: ProcessingStatus, 
                           error: Optional[str] = None) -> bool:
         """Update the processing status of a PDF document.
@@ -183,6 +186,7 @@ class PDFRepository(MongoRepository):
         )
         return result.modified_count > 0
     
+    @mongo_retry(max_retries=3, delay=1)
     def save_pdf_chunk(self, chunk: PDFChunk) -> str:
         """Save a PDF chunk to the database.
         
@@ -225,6 +229,7 @@ class PDFRepository(MongoRepository):
         chunk_result = self.pdf_chunks.delete_many({"pdf_id": pdf_id})
         return doc_result.deleted_count > 0, chunk_result.deleted_count > 0
     
+    @mongo_retry(max_retries=3, delay=1)
     def update_pdf_document(self, pdf_id: str, update_data: Dict[str, Any]) -> bool:
         """Update a PDF document with the provided data.
         

@@ -21,9 +21,16 @@ from routers.auth import auth_middleware
 # Create router
 router = APIRouter(prefix="/api/pdf", tags=["PDF"])
 
-# Redis client
+# Redis client with connection parameters for replica set
 print(f"Redis URL: {settings.dict()}")
-redis_client = redis.from_url(settings.REDIS_URL)
+redis_client = redis.from_url(
+    settings.REDIS_URL,
+    socket_connect_timeout=settings.REDIS_SOCKET_CONNECT_TIMEOUT,
+    socket_timeout=settings.REDIS_SOCKET_TIMEOUT,
+    socket_keepalive=True,
+    retry_on_timeout=True,
+    health_check_interval=settings.REDIS_HEALTH_CHECK_INTERVAL
+)
 
 
 class WebSocketManager:
