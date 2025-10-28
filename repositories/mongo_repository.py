@@ -7,16 +7,42 @@ from bson.objectid import ObjectId
 from config import settings
 
 class MongoRepository:
-    """Base repository for MongoDB operations."""
+    """Base repository for MongoDB operations with replica set support."""
     
     def __init__(self, mongo_uri: str = None):
-        """Initialize MongoDB client.
+        """Initialize MongoDB client with replica set support.
         
         Args:
             mongo_uri: MongoDB connection string. If None, uses the one from settings.
         """
         self.mongo_uri = mongo_uri or settings.MONGO_URI
-        self.client = pymongo.MongoClient(self.mongo_uri)
+        
+        # Create MongoDB client with replica set configuration
+        self.client = pymongo.MongoClient(
+            self.mongo_uri,
+            serverSelectionTimeoutMS=5000,  # 5 second timeout for server selection
+            connectTimeoutMS=10000,          # 10 second connection timeout
+            socketTimeoutMS=10000,           # 10 second socket timeout
+            maxPoolSize=50,                  # Maximum connection pool size
+            minPoolSize=10,                  # Minimum connection pool size
+            retryWrites=True,                # Automatically retry write operations
+            retryReads=True,                 # Automatically retry read operations
+            maxIdleTimeMS=45000,             # Close idle connections after 45 seconds
+            waitQueueTimeoutMS=10000         # Wait up to 10 seconds for a connection from pool
+        )
+        
+        # Verify replica set connection on initialization
+        try:
+            server_info = self.client.admin.command('ismaster')
+            if server_info.get('setName'):
+                print(f"✓ MongoDB connected to replica set: {server_info.get('setName')}")
+                print(f"  Primary: {server_info.get('primary', 'N/A')}")
+                print(f"  Hosts: {', '.join(server_info.get('hosts', []))}")
+            else:
+                print(f"✓ MongoDB connected (single instance, no replica set)")
+        except Exception as e:
+            print(f"⚠ MongoDB connection warning: Could not verify replica set status - {e}")
+            print(f"  Continuing with connection anyway...")
         
     def get_db(self, db_name: str):
         """Get a database by name."""

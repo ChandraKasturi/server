@@ -1,0 +1,366 @@
+---
+# Namespace for the application
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sahasra-api
+  labels:
+    name: sahasra-api
+
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sahasra-api-config
+  namespace: sahasra-api
+data:
+  # MongoDB Configuration (Replica Set)
+  MONGO_URI: "mongodb://mongo-0.mongo-headless.mongo.svc.cluster.local:27017,mongo-1.mongo-headless.mongo.svc.cluster.local:27017,mongo-2.mongo-headless.mongo.svc.cluster.local:27017/?replicaSet=rs0&retryWrites=true&w=majority&readPreference=primaryPreferred"
+  
+  # Redis Configuration
+  REDIS_URL: "redis://redis-master.redis.svc.cluster.local:6379/0"
+  REDIS_MAX_WORKERS: "5"
+  REDIS_SOCKET_TIMEOUT: "5"
+  REDIS_SOCKET_CONNECT_TIMEOUT: "5"
+  REDIS_HEALTH_CHECK_INTERVAL: "30"
+  REDIS_RETRY_DELAY: "5"
+  REDIS_MAX_RETRIES: "3"
+  
+  # PostgreSQL Configuration
+  POSTGRES_CONNECTION_STRING: "postgresql+psycopg://testug:testug@pgvector.pgvector.svc.cluster.local:5432/"
+  PGVECTOR_CONNECTION_STRING: "postgresql+psycopg://testug:testug@pgvector.pgvector.svc.cluster.local:5432/test"
+  POSTGRES_POOL_SIZE: "20"
+  POSTGRES_MAX_OVERFLOW: "40"
+  POSTGRES_POOL_RECYCLE: "3600"
+  POSTGRES_CONNECT_TIMEOUT: "10"
+  POSTGRES_STATEMENT_TIMEOUT: "30000"
+  
+  # CORS Configuration
+  CORS_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:3001,https://sahasraai.vercel.app,https://www.sahasra.ai"
+  
+  # PDF Processing
+  PDF_MAX_FILE_SIZE: "10485760"
+  PDF_CHUNK_SIZE: "1000"
+  PDF_CHUNK_OVERLAP: "200"
+
+---
+# Secret for sensitive configuration (API keys, JWT secret)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sahasra-api-secret
+  namespace: sahasra-api
+type: Opaque
+stringData:
+  JWT_SECRET: "your-jwt-secret-key-here-change-in-production"
+  OPENAI_API_KEY: "your-openai-api-key-here"
+  GOOGLE_API_KEY: "your-google-api-key-here"
+  GEMINI_API_KEY: "your-gemini-api-key-here"
+  SUPABASE_URL: "your-supabase-url-here"
+  SUPABASE_KEY: "your-supabase-key-here"
+  EMAIL_SENDER: "no-reply@sahasra.ai"
+  ADWINGSSMS_API_KEY: "your-sms-api-key-here"
+
+---
+# PersistentVolumeClaim for static files
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sahasra-static-pvc
+  namespace: sahasra-api
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard  # Change based on your cluster's storage class
+
+---
+# Deployment for the FastAPI application
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sahasra-api
+  namespace: sahasra-api
+  labels:
+    app: sahasra-api
+spec:
+  replicas: 3  # Run 3 replicas for high availability
+  selector:
+    matchLabels:
+      app: sahasra-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: sahasra-api
+    spec:
+      containers:
+      - name: api
+        # TODO: Replace with your actual GCP Artifact Registry image URI
+        # Format: REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/IMAGE_NAME:TAG
+        # Example: us-central1-docker.pkg.dev/my-project/sahasra/sahasra-api:v1.0.0
+        image: your-registry/sahasra-api:latest  # Replace with your Docker image
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: sahasra-api-config
+        - secretRef:
+            name: sahasra-api-secret
+        
+        # Volume mounts
+        volumeMounts:
+        - name: static-files
+          mountPath: /app/server/static
+        
+        # Resource limits and requests
+        resources:
+          requests:
+            cpu: "2000m"
+            memory: "2Gi"
+          limits:
+            cpu: "4000m"
+            memory: "4Gi"
+        
+        # Liveness probe - check if container is alive
+        livenessProbe:
+          httpGet:
+            path: /api/ping
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        # Readiness probe - check if container is ready to serve traffic
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        
+        # Startup probe - give app time to start up
+        startupProbe:
+          httpGet:
+            path: /api/ping
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30  # Allow up to 5 minutes for startup
+      
+      volumes:
+      - name: static-files
+        persistentVolumeClaim:
+          claimName: sahasra-static-pvc
+      
+      # Add pod anti-affinity to spread replicas across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - sahasra-api
+              topologyKey: kubernetes.io/hostname
+
+---
+# Service for the FastAPI application
+apiVersion: v1
+kind: Service
+metadata:
+  name: sahasra-api
+  namespace: sahasra-api
+  labels:
+    app: sahasra-api
+  annotations:
+    # For AWS - uncomment and configure as needed
+    # service.beta.kubernetes.io/aws-load-balancer-type: "nlb"  # Network Load Balancer
+    # service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    # For GCP - uncomment as needed
+    # cloud.google.com/load-balancer-type: "External"
+    # For Azure - uncomment as needed
+    # service.beta.kubernetes.io/azure-load-balancer-internal: "false"
+spec:
+  type: LoadBalancer  # Changed from ClusterIP to LoadBalancer
+  ports:
+  - port: 80          # External port (standard HTTP)
+    targetPort: 8000  # Internal container port
+    protocol: TCP
+    name: http
+  - port: 443         # External port (HTTPS) - optional, for SSL termination at LB
+    targetPort: 8000  # You'd need to configure SSL in the app or use Ingress
+    protocol: TCP
+    name: https
+  selector:
+    app: sahasra-api
+  # Optional: Preserve client source IP
+  externalTrafficPolicy: Local  # or "Cluster" for better distribution
+
+---
+# HorizontalPodAutoscaler for automatic scaling
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sahasra-api-hpa
+  namespace: sahasra-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sahasra-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+
+---
+# PodDisruptionBudget to ensure availability during voluntary disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sahasra-api-pdb
+  namespace: sahasra-api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: sahasra-api
+
+---
+# Ingress for external access (optional - configure based on your ingress controller)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sahasra-api-ingress
+  namespace: sahasra-api
+  annotations:
+    kubernetes.io/ingress.class: "nginx"  # Change based on your ingress controller
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"  # For SSL certificates
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"  # Allow larger file uploads
+spec:
+  tls:
+  - hosts:
+    - api.sahasra.ai  # Replace with your domain
+    secretName: sahasra-api-tls
+  rules:
+  - host: api.sahasra.ai  # Replace with your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: sahasra-api
+            port:
+              number: 8000
+
+---
+# NetworkPolicy for security (optional but recommended)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sahasra-api-netpol
+  namespace: sahasra-api
+spec:
+  podSelector:
+    matchLabels:
+      app: sahasra-api
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx  # Allow traffic from ingress controller
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow MongoDB
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: mongo
+    ports:
+    - protocol: TCP
+      port: 27017
+  # Allow Redis
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow PostgreSQL
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: pgvector
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow external HTTPS (for API calls to OpenAI, Google, etc.)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+
