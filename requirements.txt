@@ -49,7 +49,6 @@ kokoro
 python-dateutil
 jinja2
 python-dotenv
-concurrent-futures
 
 # Optional/Development
 mdtex2html 
