@@ -49,7 +49,6 @@ kokoro
 python-dateutil
 jinja2
 python-dotenv
-bson
 concurrent-futures
 
 # Optional/Development
