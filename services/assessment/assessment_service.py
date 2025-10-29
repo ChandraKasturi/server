@@ -15,7 +15,7 @@ from repositories.postgres_text_repository import PostgresTextRepository
 from repositories.pdf_repository import PDFRepository
 from services.langchain.langchain_service import LangchainService
 from models.pdf_models import ProcessingStatus, QuestionType
-from langchain.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_postgres.vectorstores import PGVector
 
@@ -92,7 +92,7 @@ class AssessmentService:
             for topic_name, topic_question_count in questions_per_topic.items():
                 # Find matching questions for this topic
                 base_query = {
-                    "subject": f"x-{subject}" if not subject.startswith("x-") else subject,
+                    "subject": f"x_{subject}" if not subject.startswith("x_") else subject,
                     "topic": topic_name,
                 }
                 
@@ -100,7 +100,7 @@ class AssessmentService:
                     base_query["subtopic"] = subtopic
                     
                 if level:
-                    base_query["level"] = int(level)
+                    base_query["level"] = str(level)
                 
                 # If we have only one question type, fetch all questions of that type
                 if len(question_types) == 1:
@@ -154,7 +154,7 @@ class AssessmentService:
                             )
                             
                             db_questions.extend(type_questions)
-            print(f"DB QUESTIONS {db_questions}")
+            
             # If not enough questions, generate some using LLM
             if len(db_questions) < num_questions:
                 # Number of questions to generate
@@ -1310,7 +1310,8 @@ class AssessmentService:
             # Limit the number of questions to a reasonable range
             num_questions = max(1, min(num_questions, 20))
             
-            # Generate questions using LLM
+            # Generate questions using
+            #  LLM
             questions = self._generate_questions_from_pdf(
                 pdf_text['content'],
                 pdf_document.title,
@@ -1834,7 +1835,7 @@ class AssessmentService:
         filtered_questions = []
         # Define fields that are safe to send in generation response
         safe_fields = ["question", "option1", "option2", "option3", "option4", 
-                      "question_type","question_image", "subject", "topic", "subtopic", "level", "questionset", 
+                      "question_type", "subject", "topic", "subtopic", "level", "questionset", 
                       "marks", "created_at", "_id", "id", 
                       "expected_length", "scenario_type", "pdf_id", "generated_at", "image_url", 
                       "image_caption", "has_image","title"]
