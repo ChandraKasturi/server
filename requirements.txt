@@ -1,0 +1,56 @@
+# Core Framework & Web
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+python-multipart
+
+# Database & Storage
+psycopg2-binary
+psycopg2
+psycopg
+psycopg-pool
+pymongo
+redis
+supabase
+
+# AI/ML & LLM
+openai
+google-genai
+langchain-classic
+langchain
+langchain-openai
+langchain-google-genai
+langchain-core
+langchain-postgres
+langchain-mongodb
+langchain-text-splitters
+
+# PDF Processing
+pypdf
+pymupdf
+pillow
+
+# Authentication & Security
+pyjwt
+cryptography
+
+# HTTP & API
+httpx
+requests
+
+# Media & TTS
+soundfile
+numpy
+av
+kokoro
+
+# Utilities & Dependencies
+python-dateutil
+jinja2
+python-dotenv
+bson
+concurrent-futures
+
+# Optional/Development
+mdtex2html 
