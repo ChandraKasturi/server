@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from config import settings
-from routers import auth, assessment, profile, chat, pdf, learn, health
+from routers import auth, assessment, profile, chat, pdf, learn
 from services.pdf.pdf_service import PDFProcessingService
 
 # Initialize Redis client with connection parameters for replica set
@@ -57,7 +57,6 @@ if not os.path.exists(pdfs_dir):
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # Include routers
-app.include_router(health.router)  # Health check endpoints first
 app.include_router(auth.router)
 app.include_router(assessment.router)
 app.include_router(profile.router)
