@@ -1,14 +1,12 @@
 from typing import List, Dict, Any, Optional, Tuple
 from langchain_text_splitters import RecursiveCharacterTextSplitter, CharacterTextSplitter
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.vectorstores import SupabaseVectorStore
+from langchain_openai import OpenAIEmbeddings
+from langchain_openai import ChatOpenAI 
+from langchain_classic.vectorstores import SupabaseVectorStore
 from langchain_postgres.vectorstores import PGVector
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
-from langchain.retrievers.multi_query import MultiQueryRetriever
+from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from langchain_core.runnables import RunnablePassthrough, RunnableWithMessageHistory
 from langchain_core.documents import Document
 from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory

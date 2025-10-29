@@ -23,7 +23,7 @@ from repositories.pgvector_repository import LangchainVectorRepository
 from repositories.postgres_text_repository import PostgresTextRepository
 from repositories.mongo_repository import QuestionRepository
 from langchain_postgres.vectorstores import PGVector
-from langchain.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 
