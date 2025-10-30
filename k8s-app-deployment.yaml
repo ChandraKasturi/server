@@ -32,7 +32,7 @@ metadata:
   labels:
     app: sahasra-api
 spec:
-  replicas: 3  # Run 3 replicas for high availability
+  replicas: 1  # Run 3 replicas for high availability
   selector:
     matchLabels:
       app: sahasra-api
@@ -168,7 +168,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: sahasra-api
-  minReplicas: 3
+  minReplicas: 1
   maxReplicas: 10
   metrics:
   - type: Resource
