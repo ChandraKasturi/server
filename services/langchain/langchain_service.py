@@ -3,6 +3,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter, CharacterTe
 from langchain_openai import OpenAIEmbeddings
 from langchain_openai import ChatOpenAI 
 from langchain_classic.vectorstores import SupabaseVectorStore
+from langchain_postgres import PGVectorStore
+from langchain_postgres import PGEngine
 from langchain_postgres.vectorstores import PGVector
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
@@ -438,11 +440,11 @@ class LangchainService:
         """
         def _get_docs_sync():
             # Initialize PGVector with the student-specific connection
-            pdf_vector_store = PGVector(
-                embeddings=self.embeddings,
-                collection_name=collection_name,
-                connection=connection_string,
-                use_jsonb=True
+            ug = PGEngine.from_connection_string(url=connection_string)
+            pdf_vector_store = PGVectorStore.create(
+                engine=ug,
+                embedding_service=self.embeddings,
+                table_name=collection_name,
             )
             
             # Create a retriever from the vector store
@@ -685,11 +687,11 @@ class LangchainService:
         try:
             # Try to connect to the image captions collection
             try:
-                image_vector_store = PGVector(
-                    embeddings=self.embeddings,
-                    collection_name=collection_name,
-                    connection=connection_string,
-                    use_jsonb=True
+                ug = PGEngine.from_connection_string(url=connection_string)
+                image_vector_store = PGVectorStore.create(
+                    engine=ug,
+                    embedding_service=self.embeddings,
+                    table_name=collection_name,
                 )
                 
                 # Perform similarity search to find relevant image

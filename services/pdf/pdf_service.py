@@ -978,13 +978,13 @@ class PDFProcessingService:
         
         # Create collection name for the PDF within the student's database
         collection_name = f"pdf_{pdf_id}"
-        
+
+        ug = PGEngine.from_connection_string(url=connection_string)
         # Use PGVector with student-specific connection
-        vector_store = PGVector(
-            embeddings=embeddings,
-            collection_name=collection_name,
-            connection=connection_string,
-            use_jsonb=True
+        vector_store = PGVectorStore.create(
+            engine=ug,
+            embedding_service=embeddings,
+            table_name=collection_name,
         )
         
         # Convert chunks to documents for vector storage
@@ -1167,9 +1167,10 @@ class PDFProcessingService:
         
         # Create collection name for the images within the student's database
         collection_name = f"pdf_{pdf_id}_images"
-        
+
+        ug = PGEngine.from_connection_string(url=connection_string)
         # Use PGVector with student-specific connection
-        vector_store = PGVector(
+        vector_store = PGVectorStore(
             embeddings=embeddings,
             collection_name=collection_name,
             connection=connection_string,
