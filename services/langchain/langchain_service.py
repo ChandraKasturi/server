@@ -441,7 +441,7 @@ class LangchainService:
         def _get_docs_sync():
             # Initialize PGVector with the student-specific connection
             ug = PGEngine.from_connection_string(url=connection_string)
-            pdf_vector_store = PGVectorStore.create(
+            pdf_vector_store = PGVectorStore.create_sync(
                 engine=ug,
                 embedding_service=self.embeddings,
                 table_name=collection_name,
@@ -688,7 +688,7 @@ class LangchainService:
             # Try to connect to the image captions collection
             try:
                 ug = PGEngine.from_connection_string(url=connection_string)
-                image_vector_store = PGVectorStore.create(
+                image_vector_store = PGVectorStore.create_sync(
                     engine=ug,
                     embedding_service=self.embeddings,
                     table_name=collection_name,

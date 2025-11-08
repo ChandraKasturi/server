@@ -1777,7 +1777,7 @@ class AssessmentService:
             # Connect to PGVector with image captions collection
             try:
                 ug = PGEngine.from_connection_string(url=connection_string)
-                vector_store = PGVectorStore.create(
+                vector_store = PGVectorStore.create_sync(
                     engine=ug,
                     embedding_service=embeddings,
                     table_name=collection_name,

@@ -162,7 +162,7 @@ class LangchainVectorRepository:
         self.api_key = openai_api_key or settings.OPENAI_API_KEY
         self.embeddings = OpenAIEmbeddings(api_key=self.api_key)
         self.ug = PGEngine.from_connection_string(url=settings.PGVECTOR_CONNECTION_STRING)
-        self.vector_store = PGVectorStore.create(
+        self.vector_store = PGVectorStore.create_sync(
             engine=self.ug,
             embedding_service=self.embeddings,
             table_name=collection_name,

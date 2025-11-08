@@ -187,7 +187,7 @@ class LearningService:
                         
                         # Initialize PGVector with the student-specific connection
                         ug = PGEngine.from_connection_string(url=connection_string)
-                        pdf_vector_store = PGVectorStore.create(
+                        pdf_vector_store = PGVectorStore.create_sync(
                             engine=ug,
                             embedding_service=self.embeddings,
                             table_name=collection_name,
@@ -245,7 +245,7 @@ class LearningService:
         def _get_results_sync():
             ug = PGEngine.from_connection_string(url=settings.PGVECTOR_CONNECTION_STRING)
             # Initialize PGVector with the subject collection
-            subject_vector_store = PGVectorStore.create(
+            subject_vector_store = PGVectorStore.create_sync(
                 engine=ug,
                 embedding_service=self.embeddings,
                 table_name=subject_collection,
@@ -1767,7 +1767,7 @@ class LearningService:
             embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
             ug = PGEngine.from_connection_string(url=connection_string)
             # Use PGVector with subject-specific collection
-            vector_store = PGVectorStore.create(
+            vector_store = PGVectorStore.create_sync(
                 engine=ug,
                 embedding_service=embeddings,
                 table_name=collection_name,
@@ -1858,7 +1858,7 @@ class LearningService:
             embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
             
             # Use PGVector with subject-specific collection
-            vector_store = PGVectorStore.create(
+            vector_store = PGVectorStore.create_sync(
                 engine=ug,
                 embedding_service=embeddings,
                 table_name=collection_name,
@@ -1941,7 +1941,7 @@ class LearningService:
             connection_string = settings.PGVECTOR_CONNECTION_STRING
             
             # Initialize vector store
-            image_vector_store = PGVectorStore.create(
+            image_vector_store = PGVectorStore.create_sync(
                 engine=ug,
                 embedding_service=self.embeddings,
                 table_name=collection_name,
@@ -2284,7 +2284,7 @@ class LearningService:
             embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
             
             # Use PGVector with subject-specific collection
-            vector_store = PGVectorStore.create(
+            vector_store = PGVectorStore.create_sync(
                 engine=ug,
                 embedding_service=embeddings,
                 table_name=collection_name,
