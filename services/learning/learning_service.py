@@ -68,7 +68,7 @@ class LearningService:
         self.embeddings = OpenAIEmbeddings(api_key=self.api_key)
         '''self.embeddings = GoogleGenerativeAIEmbeddings(google_api_key=settings.GOOGLE_API_KEY,model="models/gemini-embedding-exp-03-07")'''
         self.llm = ChatOpenAI(api_key=self.api_key)
-        self.ug_llm = ChatOpenAI(api_key=self.api_key, model="gpt-5-mini")
+        self.ug_llm = ChatOpenAI(api_key=self.api_key, model="gpt-5")
         '''self.llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")
         self.ug_llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")'''
         self.pdf_repository = PDFRepository()
@@ -1849,10 +1849,11 @@ class LearningService:
         """
         try:
             # Create subject-specific collection name for learning PDF images
-            collection_name = f"learning_{subject}_images_{user_id}"
-            ug = PGEngine.from_connection_string(url=connection_string)
-            # Use the main PGVector connection
             connection_string = settings.PGVECTOR_CONNECTION_STRING
+            ug = PGEngine.from_connection_string(url=connection_string)
+            collection_name = f"learning_{subject}_images_{user_id}"
+            # Use the main PGVector connection
+            
             
             # Initialize embeddings
             embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
@@ -1936,9 +1937,10 @@ class LearningService:
         try:
             # Create collection name for learning PDF images
             collection_name = f"learning_{subject}_images_{user_id}"
+            connection_string = settings.PGVECTOR_CONNECTION_STRING
             ug = PGEngine.from_connection_string(url=connection_string)
             # Use the main PGVector connection
-            connection_string = settings.PGVECTOR_CONNECTION_STRING
+           
             
             # Initialize vector store
             image_vector_store = PGVectorStore.create_sync(
@@ -2275,10 +2277,11 @@ class LearningService:
         try:
             # Create subject-specific collection name for learning images
             collection_name = f"learning_{subject}_images_{user_id}"
+            connection_string = settings.PGVECTOR_CONNECTION_STRING
             ug = PGEngine.from_connection_string(url=connection_string)
             
             # Use the main PGVector connection
-            connection_string = settings.PGVECTOR_CONNECTION_STRING
+            
             
             # Initialize embeddings
             embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
