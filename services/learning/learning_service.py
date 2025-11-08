@@ -562,7 +562,7 @@ class LearningService:
             
             # Join all context parts
             context = "\n".join(all_context_parts) if all_context_parts else ""            
-            
+            context = context + "\n\n Important: Make sure to Answer in Markdown and latex where ever applicable and format them"
             # STEP 5: Create enhanced prompt with subject-specific system message and image references
             system_prompt = self.SUBJECT_PROMPTS.get(subject, "You are an educational assistant.")
             
