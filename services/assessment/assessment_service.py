@@ -17,7 +17,8 @@ from services.langchain.langchain_service import LangchainService
 from models.pdf_models import ProcessingStatus, QuestionType
 from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_postgres.vectorstores import PGVector
+from langchain_postgres import PGVectorStore
+from langchain_postgres import PGEngine
 
 class AssessmentService:
     """Service for handling assessment-related operations."""
@@ -1775,11 +1776,11 @@ class AssessmentService:
             
             # Connect to PGVector with image captions collection
             try:
-                vector_store = PGVector(
-                    embeddings=embeddings,
-                    collection_name=collection_name,
-                    connection=connection_string,
-                    use_jsonb=True
+                ug = PGEngine.from_connection_string(url=connection_string)
+                vector_store = PGVectorStore.create(
+                    engine=ug,
+                    embedding_service=embeddings,
+                    table_name=collection_name,
                 )
                 
                 # Process each question to find a relevant image

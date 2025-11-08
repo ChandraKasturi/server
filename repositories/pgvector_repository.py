@@ -4,7 +4,8 @@ import psycopg2
 from psycopg2 import pool
 from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_postgres.vectorstores import PGVector
+from langchain_postgres import PGVectorStore
+from langchain_postgres import PGEngine
 from langchain_core.documents import Document
 
 from config import settings
@@ -160,12 +161,11 @@ class LangchainVectorRepository:
         self.collection_name = collection_name
         self.api_key = openai_api_key or settings.OPENAI_API_KEY
         self.embeddings = OpenAIEmbeddings(api_key=self.api_key)
-        
-        self.vector_store = PGVector(
-            embeddings=self.embeddings,
-            collection_name=collection_name,
-            connection_string=settings.PGVECTOR_CONNECTION_STRING,
-            use_jsonb=True,
+        self.ug = PGEngine.from_connection_string(url=settings.PGVECTOR_CONNECTION_STRING)
+        self.vector_store = PGVectorStore.create(
+            engine=self.ug,
+            embedding_service=self.embeddings,
+            table_name=collection_name,
         )
     
     def add_documents(self, documents: List[Document]) -> List[str]:

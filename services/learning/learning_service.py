@@ -9,7 +9,8 @@ from loguru import logger
 from typing import List, Dict, Any, Optional, Tuple, BinaryIO
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_postgres.vectorstores import PGVector
+from langchain_postgres import PGVectorStore
+from langchain_postgres import PGEngine
 from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -185,18 +186,18 @@ class LearningService:
                         collection_name = f"pdf_{pdf.id}"
                         
                         # Initialize PGVector with the student-specific connection
-                        pdf_vector_store = PGVector(
-                            embeddings=self.embeddings,
-                            collection_name=collection_name,
-                            connection=connection_string,
-                            use_jsonb=True
+                        ug = PGEngine.from_connection_string(url=connection_string)
+                        pdf_vector_store = PGVectorStore.create(
+                            engine=ug,
+                            embedding_service=self.embeddings,
+                            table_name=collection_name,
                         )
                         
                         # Create a retriever from the vector store
-                        pdf_retriever = pdf_vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 2})
+                        """pdf_retriever = pdf_vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 2})"""
                         
                         # Get relevant documents from this PDF
-                        pdf_results = pdf_retriever.get_relevant_documents(question)
+                        pdf_results = pdf_vector_store.similarity_search(question, k=2)
                         # Add source information to each document
                         for doc in pdf_results:
                             if not hasattr(doc, "metadata"):
@@ -242,19 +243,19 @@ class LearningService:
             List of relevant documents
         """
         def _get_results_sync():
+            ug = PGEngine.from_connection_string(url=settings.PGVECTOR_CONNECTION_STRING)
             # Initialize PGVector with the subject collection
-            subject_vector_store = PGVector(
-                embeddings=self.embeddings,
-                collection_name=subject_collection,
-                connection=settings.PGVECTOR_CONNECTION_STRING,
-                use_jsonb=True
+            subject_vector_store = PGVectorStore.create(
+                engine=ug,
+                embedding_service=self.embeddings,
+                table_name=subject_collection,
             )
             
             # Create a retriever from the vector store
-            subject_retriever = subject_vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 5})
+            """subject_retriever = subject_vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 5})"""
             
             # Get relevant documents from subject collection
-            return subject_retriever.get_relevant_documents(question)
+            return subject_vector_store.similarity_search(question, k=5)
         
         # Run the synchronous operation in a thread pool
         loop = asyncio.get_event_loop()
@@ -1764,13 +1765,12 @@ class LearningService:
             
             # Initialize embeddings
             embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
-            
+            ug = PGEngine.from_connection_string(url=connection_string)
             # Use PGVector with subject-specific collection
-            vector_store = PGVector(
-                embeddings=embeddings,
-                collection_name=collection_name,
-                connection=connection_string,
-                use_jsonb=True
+            vector_store = PGVectorStore.create(
+                engine=ug,
+                embedding_service=embeddings,
+                table_name=collection_name,
             )
             
             # Convert chunks to documents for vector storage
@@ -1850,7 +1850,7 @@ class LearningService:
         try:
             # Create subject-specific collection name for learning PDF images
             collection_name = f"learning_{subject}_images_{user_id}"
-            
+            ug = PGEngine.from_connection_string(url=connection_string)
             # Use the main PGVector connection
             connection_string = settings.PGVECTOR_CONNECTION_STRING
             
@@ -1858,11 +1858,10 @@ class LearningService:
             embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
             
             # Use PGVector with subject-specific collection
-            vector_store = PGVector(
-                embeddings=embeddings,
-                collection_name=collection_name,
-                connection=connection_string,
-                use_jsonb=True
+            vector_store = PGVectorStore.create(
+                engine=ug,
+                embedding_service=embeddings,
+                table_name=collection_name,
             )
             
             # Convert image captions to documents for vector storage
@@ -1937,16 +1936,15 @@ class LearningService:
         try:
             # Create collection name for learning PDF images
             collection_name = f"learning_{subject}_images_{user_id}"
-            
+            ug = PGEngine.from_connection_string(url=connection_string)
             # Use the main PGVector connection
             connection_string = settings.PGVECTOR_CONNECTION_STRING
             
             # Initialize vector store
-            image_vector_store = PGVector(
-                embeddings=self.embeddings,
-                collection_name=collection_name,
-                connection=connection_string,
-                use_jsonb=True
+            image_vector_store = PGVectorStore.create(
+                engine=ug,
+                embedding_service=self.embeddings,
+                table_name=collection_name,
             )
             
             # Perform similarity search to find relevant images
@@ -2277,6 +2275,7 @@ class LearningService:
         try:
             # Create subject-specific collection name for learning images
             collection_name = f"learning_{subject}_images_{user_id}"
+            ug = PGEngine.from_connection_string(url=connection_string)
             
             # Use the main PGVector connection
             connection_string = settings.PGVECTOR_CONNECTION_STRING
@@ -2285,11 +2284,10 @@ class LearningService:
             embeddings = OpenAIEmbeddings(openai_api_key=self.api_key)
             
             # Use PGVector with subject-specific collection
-            vector_store = PGVector(
-                embeddings=embeddings,
-                collection_name=collection_name,
-                connection=connection_string,
-                use_jsonb=True
+            vector_store = PGVectorStore.create(
+                engine=ug,
+                embedding_service=embeddings,
+                table_name=collection_name,
             )
             
             # Create document with comprehensive metadata
