@@ -22,7 +22,8 @@ from repositories.pdf_repository import PDFRepository
 from repositories.pgvector_repository import LangchainVectorRepository
 from repositories.postgres_text_repository import PostgresTextRepository
 from repositories.mongo_repository import QuestionRepository
-from langchain_postgres.vectorstores import PGVector
+from langchain_postgres import PGVectorStore
+from langchain_postgres import PGEngine
 from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
@@ -981,7 +982,7 @@ class PDFProcessingService:
 
         ug = PGEngine.from_connection_string(url=connection_string)
         # Use PGVector with student-specific connection
-        vector_store = PGVectorStore.create(
+        vector_store = PGVectorStore.create_sync(
             engine=ug,
             embedding_service=embeddings,
             table_name=collection_name,
