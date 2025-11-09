@@ -68,10 +68,10 @@ class LearningService:
         self.api_key = openai_api_key or settings.OPENAI_API_KEY
         self.embeddings = OpenAIEmbeddings(api_key=self.api_key)
         '''self.embeddings = GoogleGenerativeAIEmbeddings(google_api_key=settings.GOOGLE_API_KEY,model="models/gemini-embedding-exp-03-07")'''
-        self.llm = ChatOpenAI(api_key=self.api_key)
-        self.ug_llm = ChatOpenAI(api_key=self.api_key, model="gpt-5")
-        '''self.llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")
-        self.ug_llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")'''
+        '''self.llm = ChatOpenAI(api_key=self.api_key)
+        self.ug_llm = ChatOpenAI(api_key=self.api_key, model="gpt-5")'''
+        self.llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.5-pro")
+        self.ug_llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.5-pro")
         self.pdf_repository = PDFRepository()
         self.history_repository = HistoryRepository()
         self.quotes_repository = QuotesRepository()
