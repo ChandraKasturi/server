@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     MONGO_DATABASE_SUBJECTDATA: str = "sahasra_subjectdata"
     MONGO_COLLECTION_TOPIC_SUBTOPIC: str = "topic_subtopic"
     MONGO_DATABASE_HISTORY: str = "history" # Base name for history DB/collection (used as collection name in LangChain)
+    MONGO_HISTORY_SIZE: int = 1
 
     # JWT
     JWT_SECRET: str
