@@ -99,7 +99,7 @@ class LearningService:
             database_name=student_id,
             collection_name=collection_name,
             session_id=session_id,
-            history_size=2
+            history_size=settings.MONGO_HISTORY_SIZE
         )
 
     def _get_session_history(self, student_id: str, subject: str):
