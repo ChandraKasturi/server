@@ -5,6 +5,7 @@ import uuid
 import tempfile
 import shutil
 import io
+import time
 from loguru import logger
 from typing import List, Dict, Any, Optional, Tuple, BinaryIO
 from langchain_openai import ChatOpenAI
@@ -608,6 +609,10 @@ class LearningService:
         Returns:
             Tuple of (response_dict, status_code) containing answer and image information
         """
+        # ⏱️ START TIMING
+        start_time = time.time()
+        logger.info(f"🚀 [TIMING] learn_subject started for {subject} - Question: {question[:50]}...")
+        
         try:
             # Validate subject
             if subject not in self.SUBJECT_COLLECTIONS:
@@ -649,7 +654,11 @@ class LearningService:
                 retrieval_tasks.append(self._return_empty_list_async())
             
             # Execute all retrievals in parallel - MAJOR PERFORMANCE IMPROVEMENT
+            retrieval_start = time.time()
             subject_docs, pdf_docs, relevant_images = await asyncio.gather(*retrieval_tasks)
+            retrieval_time = time.time() - retrieval_start
+            logger.info(f"⏱️ [TIMING] Parallel retrieval completed in {retrieval_time:.2f}s")
+            logger.info(f"   - Retrieved {len(subject_docs)} subject docs, {len(pdf_docs)} PDF docs, {len(relevant_images)} images")
             
             # Extract content from subject knowledge documents
             subject_context = [doc.page_content for doc in subject_docs]
@@ -674,6 +683,12 @@ class LearningService:
             # Join all context parts
             context = "\n".join(all_context_parts) if all_context_parts else ""            
             context = context + "\n\n Important: Make sure to Answer in Markdown and latex where ever applicable and format them"
+            
+            # ⏱️ Log context size
+            context_chars = len(context)
+            context_tokens_estimate = context_chars // 4  # Rough estimate: 1 token ≈ 4 chars
+            logger.info(f"⏱️ [TIMING] Context prepared: {context_chars} chars (~{context_tokens_estimate} tokens)")
+            
             # STEP 5: Create enhanced prompt with subject-specific system message and image references
             system_prompt = self.SUBJECT_PROMPTS.get(subject, "You are an educational assistant.")
             
@@ -713,6 +728,10 @@ class LearningService:
             }
             
             # Create chain with message history if session_id is provided and run async
+            # ⏱️ THIS IS LIKELY THE SLOWEST STEP
+            llm_start = time.time()
+            logger.info(f"⏱️ [TIMING] Starting LLM generation (model: {self.ug_llm.model_name})...")
+            
             if session_id:
                 chain_with_history = RunnableWithMessageHistory(
                     chain,
@@ -730,6 +749,10 @@ class LearningService:
                 # Fallback: run without history if no session_id (async)
                 chain_input["history"] = []  # Empty history
                 answer = await self._run_chain_without_history_async(chain, chain_input)
+            
+            llm_time = time.time() - llm_start
+            logger.info(f"⏱️ [TIMING] LLM generation completed in {llm_time:.2f}s")
+            logger.info(f"   - Generated answer length: {len(answer)} chars")
             
             # STEP 7: Create structured response
             response = {
@@ -777,14 +800,24 @@ class LearningService:
             
             # Run history storage and achievements in background - DON'T WAIT FOR THEM
             # This improves response time by 100-300ms
+            background_start = time.time()
             asyncio.create_task(self._store_history_async(student_id, user_history_data))
             asyncio.create_task(self._store_history_async(student_id, ai_history_data))
             asyncio.create_task(self._process_learning_achievements_async(student_id, user_history_data))
+            background_time = time.time() - background_start
+            logger.info(f"⏱️ [TIMING] Background tasks queued in {background_time:.3f}s")
+            
+            # ⏱️ TOTAL TIME
+            total_time = time.time() - start_time
+            logger.info(f"✅ [TIMING] TOTAL learn_subject time: {total_time:.2f}s")
+            logger.info(f"   Breakdown: Retrieval={retrieval_time:.2f}s, LLM={llm_time:.2f}s, Other={total_time - retrieval_time - llm_time:.2f}s")
             
             return response, 200
             
         except Exception as e:
+            error_time = time.time() - start_time
             error_message = f"Error learning about {subject}: {str(e)}"
+            logger.error(f"❌ [TIMING] Error after {error_time:.2f}s: {error_message}")
             print(error_message)
             return {
                 "answer": error_message,
