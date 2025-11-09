@@ -730,7 +730,7 @@ class LearningService:
             # Create chain with message history if session_id is provided and run async
             # ⏱️ THIS IS LIKELY THE SLOWEST STEP
             llm_start = time.time()
-            logger.info(f"⏱️ [TIMING] Starting LLM generation (model: {self.ug_llm.model_name})...")
+            logger.info(f"⏱️ [TIMING] Starting LLM generation (model: {self.ug_llm})...")
             
             if session_id:
                 chain_with_history = RunnableWithMessageHistory(
