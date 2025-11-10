@@ -94,13 +94,15 @@ class LearningService:
         # Use subject-specific collection name
         collection_name = f"{settings.MONGO_DATABASE_HISTORY}_{subject}"
         
-        return MongoDBChatMessageHistory(
+        ug =  MongoDBChatMessageHistory(
             connection_string=settings.MONGO_URI,
             database_name=student_id,
             collection_name=collection_name,
             session_id=session_id,
             history_size=settings.MONGO_HISTORY_SIZE
         )
+        print(f"UG HISTORY : {ug.messages}")
+        return ug
 
     def _get_session_history(self, student_id: str, subject: str):
         """Factory function to create chat history for RunnableWithMessageHistory.
@@ -726,7 +728,7 @@ class LearningService:
                 "context": context,
                 "question": question
             }
-            
+            chain.stream()
             # Create chain with message history if session_id is provided and run async
             # ⏱️ THIS IS LIKELY THE SLOWEST STEP
             llm_start = time.time()
