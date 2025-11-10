@@ -728,7 +728,7 @@ class LearningService:
                 "context": context,
                 "question": question
             }
-            chain.stream()
+            
             # Create chain with message history if session_id is provided and run async
             # ⏱️ THIS IS LIKELY THE SLOWEST STEP
             llm_start = time.time()
