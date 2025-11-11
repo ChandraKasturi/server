@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, Request, Header, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, Request, Header, Query, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from typing import Optional
 from datetime import datetime, timedelta
+import json
 
 from models.pdf_models import (SubjectLearnRequest, TTSRequest, LearningPDFUploadRequest, 
                               LearningPDFUploadResponse, LearningPDFProcessingStatus,
@@ -11,6 +12,7 @@ from models.u_models import (LearnAnswerResponse, TTSVoicesResponse, LearningInf
                            UpdateQuestionRequest, UpdateQuestionResponse)
 from services.learning.learning_service import LearningService
 from services.learning.tts_service import TTSService
+from services.auth.auth_service import AuthService
 from routers.auth import auth_middleware
 from utils.json_response import UGJSONResponse
 
@@ -20,6 +22,7 @@ router = APIRouter(prefix="/api/learn", tags=["Learning"])
 # Service instances
 learning_service = LearningService()
 tts_service = TTSService()
+auth_service = AuthService()
 
 @router.post("/science", response_model=LearnAnswerResponse)
 async def learn_science(
@@ -776,6 +779,96 @@ async def upload_learning_image(
             },
             status_code=500
         )
+
+
+# WebSocket endpoint for streaming responses
+@router.websocket("/ws/{subject}")
+async def learn_subject_websocket(
+    websocket: WebSocket,
+    subject: str
+):
+    """WebSocket endpoint for streaming learning responses.
+    
+    Requires authentication via query parameter: ?x-auth-session=<jwt_token>
+    
+    Args:
+        websocket: WebSocket connection
+        subject: Subject to learn about (science, social_science, mathematics, english, hindi)
+    """
+    # Extract token from query parameters manually
+    print(f"WebSocket query parameters: {websocket.query_params}")
+    query_params = dict(websocket.query_params)
+    token = query_params.get("x-auth-session",None)
+    
+    # Authenticate before accepting connection
+    if not token:
+        await websocket.close(code=1008, reason="No authentication token provided")
+        return
+    
+    # Verify token and get student_id
+    student_id = auth_service.verify_token(token)
+    
+    if not student_id:
+        await websocket.close(code=1008, reason="Invalid or expired token")
+        return
+    
+    # Accept connection after successful authentication
+    await websocket.accept()
+    
+    try:
+        # Receive initial message with question
+        data = await websocket.receive_text()
+        request_data = json.loads(data)
+        
+        # Extract parameters
+        question = request_data.get("question")
+        include_pdfs = request_data.get("include_pdfs", True)
+        include_images = request_data.get("include_images", True)
+        
+        # session_id can be provided in message or default to token
+        session_id = request_data.get("session_id", token)
+        
+        # Validate required fields
+        if not question:
+            await websocket.send_json({
+                "type": "error",
+                "content": "Missing required field: question"
+            })
+            await websocket.close()
+            return
+        
+        # Normalize subject name
+        subject = subject.replace("-", "_").lower()
+        
+        # Stream response using authenticated student_id
+        async for chunk in learning_service.learn_subject_stream(
+            subject=subject,
+            question=question,
+            student_id=student_id,  # Using authenticated student_id
+            session_id=session_id,  # Using token or provided session_id
+            include_pdfs=include_pdfs,
+            include_images=include_images
+        ):
+            await websocket.send_json(chunk)
+        
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected for subject: {subject}, student: {student_id}")
+    except json.JSONDecodeError as e:
+        await websocket.send_json({
+            "type": "error",
+            "content": f"Invalid JSON format: {str(e)}"
+        })
+    except Exception as e:
+        print(f"Error in WebSocket for student {student_id}: {str(e)}")
+        await websocket.send_json({
+            "type": "error",
+            "content": f"Error in WebSocket connection: {str(e)}"
+        })
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
 
 
 # Generic endpoint for any subject - MUST BE LAST to avoid catching specific routes

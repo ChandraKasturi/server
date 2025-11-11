@@ -6,6 +6,8 @@ import tempfile
 import shutil
 import io
 import time
+import queue
+import threading
 from loguru import logger
 from typing import List, Dict, Any, Optional, Tuple, BinaryIO
 from langchain_openai import ChatOpenAI
@@ -28,6 +30,9 @@ from google import genai
 from google.genai import types as genai_types
 import fitz  # PyMuPDF
 import PIL.Image
+from openai import OpenAI
+from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
+from openai.types.responses.response_text_done_event import ResponseTextDoneEvent
 
 from config import settings
 from repositories.pdf_repository import PDFRepository
@@ -72,6 +77,7 @@ class LearningService:
         self.ug_llm = ChatOpenAI(api_key=self.api_key, model="gpt-4o")
         '''self.llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.5-pro")
         self.ug_llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.5-pro")'''
+        self.openai_client = OpenAI(api_key=self.api_key)
         self.pdf_repository = PDFRepository()
         self.history_repository = HistoryRepository()
         self.quotes_repository = QuotesRepository()
@@ -117,6 +123,34 @@ class LearningService:
         def get_history(session_id: str) -> MongoDBChatMessageHistory:
             return self._setup_chat_history(student_id, session_id, subject)
         return get_history
+    
+    def _convert_chat_history_to_openai_format(self, history: MongoDBChatMessageHistory) -> List[Dict[str, str]]:
+        """Convert MongoDBChatMessageHistory to OpenAI chat format.
+        
+        Args:
+            history: MongoDBChatMessageHistory instance
+            
+        Returns:
+            List of messages in OpenAI format with role and content
+        """
+        openai_messages = []
+        
+        for message in history.messages:
+            # Determine role based on message type
+            if message.type == "human":
+                role = "user"
+            elif message.type == "ai":
+                role = "assistant"
+            else:
+                # Default to user for unknown types
+                role = "user"
+            
+            openai_messages.append({
+                "role": role,
+                "content": message.content
+            })
+        
+        return openai_messages
     
     def _get_student_specific_connection_string(self, student_id: str) -> str:
         """Get a student-specific connection string for PGVector.
@@ -591,14 +625,14 @@ class LearningService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.thread_pool, _process_images_sync)
 
-    async def learn_subject(self, 
+    async def learn_subject_stream(self, 
                     subject: str, 
                     question: str, 
                     student_id: str, 
                     session_id: str = None,
                     include_pdfs: bool = True,
-                    include_images: bool = True) -> Tuple[Dict, int]:
-        """Learn about a specific subject with enhanced image support (async version).
+                    include_images: bool = True):
+        """Learn about a specific subject with streaming support (async generator).
         
         Args:
             subject: Subject to learn about (science, social_science, mathematics, english, hindi)
@@ -608,20 +642,21 @@ class LearningService:
             include_pdfs: Whether to include user's PDFs in the answer
             include_images: Whether to search for relevant images from learning PDFs
             
-        Returns:
-            Tuple of (response_dict, status_code) containing answer and image information
+        Yields:
+            Streamed response chunks
         """
         # ⏱️ START TIMING
         start_time = time.time()
-        logger.info(f"🚀 [TIMING] learn_subject started for {subject} - Question: {question[:50]}...")
+        logger.info(f"🚀 [TIMING] learn_subject_stream started for {subject} - Question: {question[:50]}...")
         
         try:
             # Validate subject
             if subject not in self.SUBJECT_COLLECTIONS:
-                return {
-                    "answer": f"Invalid subject: {subject}. Valid subjects are: {', '.join(self.SUBJECT_COLLECTIONS.keys())}",
-                    "has_image": False
-                }, 400
+                yield {
+                    "type": "error",
+                    "content": f"Invalid subject: {subject}. Valid subjects are: {', '.join(self.SUBJECT_COLLECTIONS.keys())}"
+                }
+                return
             
             # STEP 1-3: Run all retrievals in PARALLEL for better performance (async)
             subject_collection = self.SUBJECT_COLLECTIONS[subject]
@@ -637,7 +672,6 @@ class LearningService:
                     self._get_subject_pdf_content_async(student_id, subject, question)
                 )
             else:
-                # Add empty result if PDFs not requested
                 retrieval_tasks.append(self._return_empty_list_async())
             
             # Add image search task if requested
@@ -652,15 +686,21 @@ class LearningService:
                     )
                 )
             else:
-                # Add empty result if images not requested
                 retrieval_tasks.append(self._return_empty_list_async())
             
-            # Execute all retrievals in parallel - MAJOR PERFORMANCE IMPROVEMENT
+            # Execute all retrievals in parallel
             retrieval_start = time.time()
             subject_docs, pdf_docs, relevant_images = await asyncio.gather(*retrieval_tasks)
             retrieval_time = time.time() - retrieval_start
             logger.info(f"⏱️ [TIMING] Parallel retrieval completed in {retrieval_time:.2f}s")
             logger.info(f"   - Retrieved {len(subject_docs)} subject docs, {len(pdf_docs)} PDF docs, {len(relevant_images)} images")
+            
+            # Send image metadata first if available
+            if relevant_images:
+                yield {
+                    "type": "images",
+                    "content": relevant_images
+                }
             
             # Extract content from subject knowledge documents
             subject_context = [doc.page_content for doc in subject_docs]
@@ -688,7 +728,7 @@ class LearningService:
             
             # ⏱️ Log context size
             context_chars = len(context)
-            context_tokens_estimate = context_chars // 4  # Rough estimate: 1 token ≈ 4 chars
+            context_tokens_estimate = context_chars // 4
             logger.info(f"⏱️ [TIMING] Context prepared: {context_chars} chars (~{context_tokens_estimate} tokens)")
             
             # STEP 5: Create enhanced prompt with subject-specific system message and image references
@@ -705,60 +745,213 @@ class LearningService:
                 
                 image_context += "\nPlease include these relevant images in your response using markdown format with the full URLs provided above. Reference them appropriately to enhance your explanation."
             
-            prompt_messages = [
-                ("system", f"{system_prompt}\n\n"
-                          "Use the provided context to give accurate answers. "
-                          "If your answer includes information from the student's own documents, clearly indicate this. "
-                          "If relevant images are available, include them in your response using markdown format and explain how they relate to the topic. "
-                          "Always use the full image URLs provided in the image context. "
-                          "If you're unsure or the answer is not in the context, be honest about it.\n\n"
-                          f"Context: {context}{image_context}"),
-                MessagesPlaceholder(variable_name="history"),
-                ("human", "{question}")
+            # Build system message with context
+            system_message_content = f"{system_prompt}\n\n" \
+                          "Use the provided context to give accurate answers. " \
+                          "If your answer includes information from the student's own documents, clearly indicate this. " \
+                          "If relevant images are available, include them in your response using markdown format and explain how they relate to the topic. " \
+                          "Always use the full image URLs provided in the image context. " \
+                          "If you're unsure or the answer is not in the context, be honest about it.\n\n" \
+                          f"Context: {context}{image_context}"
+            
+            # STEP 6: Prepare OpenAI messages
+            messages = [
+                {"role": "system", "content": system_message_content}
             ]
             
-            # Create prompt template
-            prompt = ChatPromptTemplate.from_messages(prompt_messages)
-            
-            # STEP 6: Create chain with history integration
-            chain = prompt | self.ug_llm | StrOutputParser()
-            
-            # Prepare input for the chain
-            chain_input = {
-                "context": context,
-                "question": question
-            }
-            
-            # Create chain with message history if session_id is provided and run async
-            # ⏱️ THIS IS LIKELY THE SLOWEST STEP
-            llm_start = time.time()
-            logger.info(f"⏱️ [TIMING] Starting LLM generation (model: {self.ug_llm})...")
-            
+            # Get chat history if session_id is provided
             if session_id:
-                chain_with_history = RunnableWithMessageHistory(
-                    chain,
-                    self._get_session_history(student_id, subject),
-                    input_messages_key="question",
-                    history_messages_key="history",
-                )
+                chat_history = self._setup_chat_history(student_id, session_id, subject)
+                history_messages = self._convert_chat_history_to_openai_format(chat_history)
+                messages.extend(history_messages)
+            
+            # Add current question
+            messages.append({"role": "user", "content": question})
+            
+            # ⏱️ Start streaming
+            llm_start = time.time()
+            logger.info(f"⏱️ [TIMING] Starting OpenAI streaming...")
+            
+            # Stream response from OpenAI using responses.create()
+            # Important: OpenAI returns a sync iterator, we need to handle it in a non-blocking way
+            full_response = ""
+            
+            # Use a queue to pass events from sync iterator to async generator
+            event_queue = queue.Queue()
+            exception_holder = []
+            
+            def stream_in_thread():
+                """Run OpenAI streaming in a separate thread to avoid blocking."""
+                try:
+                    stream = self.openai_client.responses.create(
+                        model="gpt-4o",
+                        input=messages,
+                        stream=True
+                    )
+                    
+                    for event in stream:
+                        event_queue.put(("event", event))
+                    
+                    # Signal completion
+                    event_queue.put(("done", None))
+                except Exception as e:
+                    exception_holder.append(e)
+                    event_queue.put(("error", str(e)))
+            
+            # Start streaming in background thread
+            stream_thread = threading.Thread(target=stream_in_thread, daemon=True)
+            stream_thread.start()
+            
+            # Process events from queue asynchronously
+            while True:
+                # Check queue in non-blocking way
+                try:
+                    event_type, event_data = await asyncio.get_event_loop().run_in_executor(
+                        None, event_queue.get, True, 0.1  # 100ms timeout
+                    )
+                except queue.Empty:
+                    # Give control back to event loop
+                    await asyncio.sleep(0)
+                    continue
                 
-                # Configure session
-                config = {"configurable": {"session_id": session_id}}
-                
-                # Run chain with history to get answer (async)
-                answer = await self._run_chain_async(chain_with_history, chain_input, config)
-            else:
-                # Fallback: run without history if no session_id (async)
-                chain_input["history"] = []  # Empty history
-                answer = await self._run_chain_without_history_async(chain, chain_input)
+                if event_type == "done":
+                    break
+                elif event_type == "error":
+                    logger.error(f"Error in OpenAI streaming: {event_data}")
+                    if exception_holder:
+                        raise exception_holder[0]
+                    break
+                elif event_type == "event":
+                    event = event_data
+                    # Handle ResponseTextDeltaEvent for streaming chunks
+                    if isinstance(event, ResponseTextDeltaEvent):
+                        content = event.delta
+                        full_response += content
+                        # Yield immediately
+                        yield {
+                            "type": "content",
+                            "content": content
+                        }
+                        # Give control back to event loop to allow WebSocket to send
+                        await asyncio.sleep(0)
+                    # Handle ResponseTextDoneEvent for completion
+                    elif isinstance(event, ResponseTextDoneEvent):
+                        logger.info(f"Response complete. Full text length: {len(event.text)} chars")
+                        if event.text != full_response:
+                            logger.warning(f"Accumulated response differs from final text!")
             
             llm_time = time.time() - llm_start
-            logger.info(f"⏱️ [TIMING] LLM generation completed in {llm_time:.2f}s")
-            logger.info(f"   - Generated answer length: {len(answer)} chars")
+            logger.info(f"⏱️ [TIMING] OpenAI streaming completed in {llm_time:.2f}s")
+            logger.info(f"   - Generated answer length: {len(full_response)} chars")
             
-            # STEP 7: Create structured response
+            # STEP 7: Add messages to chat history if session_id provided
+            if session_id:
+                chat_history = self._setup_chat_history(student_id, session_id, subject)
+                chat_history.add_message(HumanMessage(content=question))
+                chat_history.add_message(AIMessage(content=full_response))
+            
+            # STEP 8: Store in sahasra_history for persistence (BACKGROUND - non-blocking)
+            user_history_data = {
+                "subject": subject,
+                "message": question,
+                "is_ai": False,
+                "time": datetime.utcnow(),
+                "session_id": session_id
+            }
+            
+            # Store AI response with image info
+            ai_response_text = full_response
+            if relevant_images:
+                image_refs = ", ".join([img['image_url'] for img in relevant_images])
+                ai_response_text += f" [Image references: {image_refs}]"
+            
+            ai_history_data = {
+                "subject": subject,
+                "message": ai_response_text,
+                "is_ai": True,
+                "time": datetime.utcnow(),
+                "session_id": session_id
+            }
+            
+            # Run history storage and achievements in background
+            background_start = time.time()
+            asyncio.create_task(self._store_history_async(student_id, user_history_data))
+            asyncio.create_task(self._store_history_async(student_id, ai_history_data))
+            asyncio.create_task(self._process_learning_achievements_async(student_id, user_history_data))
+            background_time = time.time() - background_start
+            logger.info(f"⏱️ [TIMING] Background tasks queued in {background_time:.3f}s")
+            
+            # Send completion signal
+            yield {
+                "type": "done",
+                "content": ""
+            }
+            
+            # ⏱️ TOTAL TIME
+            total_time = time.time() - start_time
+            logger.info(f"✅ [TIMING] TOTAL learn_subject_stream time: {total_time:.2f}s")
+            logger.info(f"   Breakdown: Retrieval={retrieval_time:.2f}s, LLM={llm_time:.2f}s, Other={total_time - retrieval_time - llm_time:.2f}s")
+            
+        except Exception as e:
+            error_time = time.time() - start_time
+            error_message = f"Error learning about {subject}: {str(e)}"
+            logger.error(f"❌ [TIMING] Error after {error_time:.2f}s: {error_message}")
+            print(error_message)
+            yield {
+                "type": "error",
+                "content": error_message
+            }
+    
+    async def learn_subject(self, 
+                    subject: str, 
+                    question: str, 
+                    student_id: str, 
+                    session_id: str = None,
+                    include_pdfs: bool = True,
+                    include_images: bool = True) -> Tuple[Dict, int]:
+        """Non-streaming version of learn_subject for backward compatibility with REST endpoints.
+        
+        This method collects all streamed chunks and returns them as a single response.
+        
+        Args:
+            subject: Subject to learn about (science, social_science, mathematics, english, hindi)
+            question: Question about the subject
+            student_id: ID of the student
+            session_id: JWT token from X-Auth-Session (optional)
+            include_pdfs: Whether to include user's PDFs in the answer
+            include_images: Whether to search for relevant images from learning PDFs
+            
+        Returns:
+            Tuple of (response_dict, status_code) containing answer and image information
+        """
+        try:
+            # Collect all chunks from the streaming version
+            full_answer = ""
+            relevant_images = []
+            
+            async for chunk in self.learn_subject_stream(
+                subject=subject,
+                question=question,
+                student_id=student_id,
+                session_id=session_id,
+                include_pdfs=include_pdfs,
+                include_images=include_images
+            ):
+                if chunk["type"] == "content":
+                    full_answer += chunk["content"]
+                elif chunk["type"] == "images":
+                    relevant_images = chunk["content"]
+                elif chunk["type"] == "error":
+                    return {
+                        "answer": chunk["content"],
+                        "has_image": False,
+                        "subject": subject,
+                        "images": []
+                    }, 500
+            
+            # Create structured response
             response = {
-                "answer": answer,
+                "answer": full_answer,
                 "has_image": len(relevant_images) > 0,
                 "subject": subject
             }
@@ -776,50 +969,10 @@ class LearningService:
                     "images": relevant_images  # All images for enhanced response
                 })
             
-            # STEP 8: Store in sahasra_history for persistence (BACKGROUND - non-blocking)
-            # Store user question
-            user_history_data = {
-                "subject": subject,
-                "message": question,
-                "is_ai": False,
-                "time": datetime.utcnow(),
-                "session_id": session_id
-            }
-            
-            # Store AI response with image info
-            ai_response_text = answer
-            if relevant_images:
-                image_refs = ", ".join([img['image_url'] for img in relevant_images])
-                ai_response_text += f" [Image references: {image_refs}]"
-            
-            ai_history_data = {
-                "subject": subject,
-                "message": ai_response_text,
-                "is_ai": True,
-                "time": datetime.utcnow(),
-                "session_id": session_id
-            }
-            
-            # Run history storage and achievements in background - DON'T WAIT FOR THEM
-            # This improves response time by 100-300ms
-            background_start = time.time()
-            asyncio.create_task(self._store_history_async(student_id, user_history_data))
-            asyncio.create_task(self._store_history_async(student_id, ai_history_data))
-            asyncio.create_task(self._process_learning_achievements_async(student_id, user_history_data))
-            background_time = time.time() - background_start
-            logger.info(f"⏱️ [TIMING] Background tasks queued in {background_time:.3f}s")
-            
-            # ⏱️ TOTAL TIME
-            total_time = time.time() - start_time
-            logger.info(f"✅ [TIMING] TOTAL learn_subject time: {total_time:.2f}s")
-            logger.info(f"   Breakdown: Retrieval={retrieval_time:.2f}s, LLM={llm_time:.2f}s, Other={total_time - retrieval_time - llm_time:.2f}s")
-            
             return response, 200
             
         except Exception as e:
-            error_time = time.time() - start_time
             error_message = f"Error learning about {subject}: {str(e)}"
-            logger.error(f"❌ [TIMING] Error after {error_time:.2f}s: {error_message}")
             print(error_message)
             return {
                 "answer": error_message,
