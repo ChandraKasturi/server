@@ -375,11 +375,20 @@ class PDFProcessingService:
         Returns:
             True if processing was successful
         """
+        import time
+        
         pdf_id = pdf_document.id
         file_path = pdf_document.file_path
         
+        # ⏱️ START TOTAL TIMING
+        total_start_time = time.time()
+        print(f"\n{'='*80}")
+        print(f"⏱️ [TIMING] Starting PDF processing for {pdf_id}")
+        print(f"{'='*80}\n")
+        
         try:
             # Update processing status (async)
+            step_start = time.time()
             await self._update_pdf_status_async(pdf_id, ProcessingStatus.PROCESSING)
             
             # Update Redis status
@@ -397,8 +406,11 @@ class PDFProcessingService:
                 "start_time": datetime.utcnow().isoformat(),
                 "step": "started"
             })
+            step_time = time.time() - step_start
+            print(f"⏱️ [TIMING] Status update and initialization: {step_time:.2f}s")
             
             # Extract images from PDF first (async)
+            step_start = time.time()
             await self.redis_client.hset(
                 f"pdf_processing_status:{pdf_id}",
                 mapping={"step": "extracting_images"}
@@ -411,9 +423,12 @@ class PDFProcessingService:
             })
             
             image_data = await self._extract_images_from_pdf_async(file_path, user_id, pdf_id)
+            step_time = time.time() - step_start
+            print(f"⏱️ [TIMING] Image extraction: {step_time:.2f}s (extracted {len(image_data)} images)")
             
             # Extract text from PDF (async)
             try:
+                step_start = time.time()
                 await self.redis_client.hset(
                     f"pdf_processing_status:{pdf_id}",
                     mapping={"step": "extracting_text"}
@@ -426,10 +441,13 @@ class PDFProcessingService:
                 })
                 
                 chunks, page_count = await self._extract_text_async(file_path)
-                print(f"Chunks: {len(chunks)}")
-                print(f"Page count: {page_count}")
+                step_time = time.time() - step_start
+                print(f"⏱️ [TIMING] Text extraction: {step_time:.2f}s")
+                print(f"   - Extracted {len(chunks)} chunks from {page_count} pages")
+                print(f"   - Average: {step_time/page_count:.2f}s per page")
                 
                 # Store the full text in PostgreSQL for the specific user (async)
+                step_start = time.time()
                 full_text = "\n\n".join([chunk["text"] for chunk in chunks])
                 full_text = full_text.replace("\x00", "")
                 
@@ -442,8 +460,11 @@ class PDFProcessingService:
                     page_count=page_count,
                     metadata=pdf_document.metadata.dict() if pdf_document.metadata else {}
                 )
+                step_time = time.time() - step_start
+                print(f"⏱️ [TIMING] Store full text in Postgres: {step_time:.2f}s")
                 
                 # Store chunks in the user's database (async)
+                step_start = time.time()
                 chunk_data = [{
                     "chunk_index": i,
                     "page_number": chunk.get("page", 0),
@@ -451,8 +472,11 @@ class PDFProcessingService:
                 } for i, chunk in enumerate(chunks)]
                 
                 await self._store_pdf_chunks_async(user_id, pdf_id, chunk_data)
+                step_time = time.time() - step_start
+                print(f"⏱️ [TIMING] Store chunks in Postgres: {step_time:.2f}s ({len(chunk_data)} chunks)")
                 
                 # Convert chunks to PDFChunk objects and store in MongoDB (async)
+                step_start = time.time()
                 await self.redis_client.hset(
                     f"pdf_processing_status:{pdf_id}",
                     mapping={"step": "storing_chunks_in_mongodb"}
@@ -476,9 +500,12 @@ class PDFProcessingService:
                     )
                     await self._save_pdf_chunk_async(chunk_obj)
                     pdf_chunks.append(chunk_obj)
+                step_time = time.time() - step_start
+                print(f"⏱️ [TIMING] Store chunks in MongoDB: {step_time:.2f}s ({len(pdf_chunks)} chunks)")
                 
                 # Process image captions (async)
                 if image_data:
+                    step_start = time.time()
                     await self.redis_client.hset(
                         f"pdf_processing_status:{pdf_id}",
                         mapping={"step": "processing_image_captions"}
@@ -493,8 +520,11 @@ class PDFProcessingService:
                     
                     # Store image captions in PGVector with a separate collection (async)
                     await self._store_image_captions_in_vector_db_async(pdf_id, image_data, user_id)
+                    step_time = time.time() - step_start
+                    print(f"⏱️ [TIMING] Store image captions in vector DB: {step_time:.2f}s ({len(image_data)} images)")
                 
                 # Store chunks in vector DB for semantic search (async)
+                step_start = time.time()
                 await self.redis_client.hset(
                     f"pdf_processing_status:{pdf_id}",
                     mapping={"step": "storing_in_vector_db"}
@@ -507,8 +537,11 @@ class PDFProcessingService:
                 })
                 
                 await self._store_chunks_in_vector_db_async(pdf_id, pdf_chunks, user_id)
+                step_time = time.time() - step_start
+                print(f"⏱️ [TIMING] Store chunks in vector DB (with embeddings): {step_time:.2f}s ({len(pdf_chunks)} chunks)")
                 
                 # Update processing status to completed (async)
+                step_start = time.time()
                 await self._update_pdf_status_async(pdf_id, ProcessingStatus.COMPLETED)
                 
                 # Update PDF metadata with image count (async)
@@ -542,12 +575,29 @@ class PDFProcessingService:
                 
                 # Publish completion event
                 await self._publish_status_update(pdf_id, completion_status)
+                step_time = time.time() - step_start
+                print(f"⏱️ [TIMING] Finalization and status update: {step_time:.2f}s")
+                
+                # ⏱️ TOTAL TIME SUMMARY
+                total_time = time.time() - total_start_time
+                print(f"\n{'='*80}")
+                print(f"✅ [TIMING] PDF processing completed successfully for {pdf_id}")
+                print(f"⏱️ [TIMING] TOTAL TIME: {total_time:.2f}s ({total_time/60:.2f} minutes)")
+                print(f"   - Pages processed: {page_count}")
+                print(f"   - Chunks created: {len(pdf_chunks)}")
+                print(f"   - Images extracted: {len(image_data)}")
+                print(f"   - Average per page: {total_time/page_count:.2f}s")
+                print(f"{'='*80}\n")
                 
                 return True
                 
             except Exception as e:
+                error_time = time.time() - total_start_time
                 error_message = f"Error processing PDF: {str(e)}"
-                print(error_message)
+                print(f"\n{'='*80}")
+                print(f"❌ [TIMING] PDF processing FAILED for {pdf_id} after {error_time:.2f}s")
+                print(f"   Error: {error_message}")
+                print(f"{'='*80}\n")
                 
                 # Update processing status to failed (async)
                 await self._update_pdf_status_async(pdf_id, ProcessingStatus.FAILED, error_message)
@@ -579,8 +629,12 @@ class PDFProcessingService:
                 return False
                 
         except Exception as e:
+            error_time = time.time() - total_start_time
             error_message = f"Unexpected error in PDF processing: {str(e)}"
-            print(error_message)
+            print(f"\n{'='*80}")
+            print(f"❌ [TIMING] PDF processing FAILED (unexpected) for {pdf_id} after {error_time:.2f}s")
+            print(f"   Error: {error_message}")
+            print(f"{'='*80}\n")
             
             # Update processing status to failed (async)
             await self._update_pdf_status_async(pdf_id, ProcessingStatus.FAILED, error_message)
@@ -779,11 +833,16 @@ class PDFProcessingService:
         Returns:
             Tuple of (chunks, num_pages)
         """
+        import time
+        method_start = time.time()
+        print(f"   ⏱️  Starting Gemini OCR text extraction...")
+        
         chunks = []
         
         try:
             # Configure Gemini client
-            gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            step_start = time.time()
+            gemini_client = genai.Client(api_key=settings.GOOGLE_API_KEY)
             
             # Read PDF file and upload to Gemini
             with open(file_path, 'rb') as file:
@@ -796,6 +855,8 @@ class PDFProcessingService:
                     file=pdf_io,
                     config=dict(mime_type='application/pdf')
                 )
+            upload_time = time.time() - step_start
+            print(f"   ⏱️  PDF upload to Gemini: {upload_time:.2f}s ({len(pdf_content)/1024/1024:.2f} MB)")
             
             # Create prompt for text extraction with page information
             extraction_prompt = f"""
@@ -815,14 +876,18 @@ class PDFProcessingService:
             """
             
             # Generate content using Gemini
+            step_start = time.time()
             response = gemini_client.models.generate_content(
                 model="gemini-2.5-pro",
                 contents=[uploaded_file, extraction_prompt]
             )
             
             extracted_text = response.text
+            api_time = time.time() - step_start
+            print(f"   ⏱️  Gemini API text extraction: {api_time:.2f}s")
             
             # Parse the response to create chunks
+            step_start = time.time()
             pages = self._parse_gemini_text_response(extracted_text)
             
             # Convert to the expected format
@@ -839,13 +904,17 @@ class PDFProcessingService:
                     })
             
             num_pages = len(pages)
+            parse_time = time.time() - step_start
+            print(f"   ⏱️  Parse and format text: {parse_time:.2f}s ({num_pages} pages, {len(chunks)} chunks)")
             
             # Clean up - delete the uploaded file from Gemini
             try:
                 gemini_client.files.delete(name=uploaded_file.name)
-                print(f"Successfully deleted uploaded file {uploaded_file.name} from Gemini.")
             except Exception as del_e:
-                print(f"Could not delete uploaded file {uploaded_file.name} from Gemini: {del_e}")
+                print(f"   Could not delete uploaded file {uploaded_file.name} from Gemini: {del_e}")
+            
+            method_total = time.time() - method_start
+            print(f"   ⏱️  TOTAL _extract_text: {method_total:.2f}s")
             
             return chunks, num_pages
             
@@ -981,6 +1050,7 @@ class PDFProcessingService:
         collection_name = f"pdf_{pdf_id}"
 
         ug = PGEngine.from_connection_string(url=connection_string)
+        ug.init_vectorstore_table(table_name=collection_name,vector_size=1536)
         # Use PGVector with student-specific connection
         vector_store = PGVectorStore.create_sync(
             engine=ug,
@@ -1064,15 +1134,20 @@ class PDFProcessingService:
         import fitz  # PyMuPDF
         from google import genai
         import PIL.Image
+        import time
+        
+        method_start = time.time()
+        print(f"   ⏱️  Starting image extraction and captioning...")
         
         image_data = []
+        caption_times = []
         
         # Create output folder for images
         images_folder = os.path.join(settings.static_dir_path, "pdf_images", pdf_id)
         os.makedirs(images_folder, exist_ok=True)
         
         # Create Gemini client
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        client = genai.Client(api_key=settings.GOOGLE_API_KEY)
         
         # Open the PDF
         doc = fitz.open(pdf_path)
@@ -1099,10 +1174,10 @@ class PDFProcessingService:
                     image_url = f"/static/pdf_images/{pdf_id}/image_{page_num + 1}_{image_count}.png"
                     
                     # Generate caption with Gemini API
+                    caption_start = time.time()
                     try:
                         # Open the image with PIL
                         pil_image = PIL.Image.open(image_filename)
-                        print(f"Creating caption for image {image_filename}")
                         # Generate caption
                         response = client.models.generate_content(
                             model="gemini-2.5-pro",
@@ -1110,9 +1185,11 @@ class PDFProcessingService:
                         )
                         
                         caption = response.text.strip()
+                        caption_time = time.time() - caption_start
+                        caption_times.append(caption_time)
                     except Exception as e:
                         caption = f"Image from page {page_num + 1}"
-                        print(f"Error generating caption with Gemini: {str(e)}")
+                        print(f"   Error generating caption with Gemini: {str(e)}")
                     
                     # Store image data
                     image_data.append({
@@ -1124,7 +1201,13 @@ class PDFProcessingService:
                     
                     image_count += 1
             
-            print(f"Extracted {image_count} images from PDF {pdf_id}")
+            method_total = time.time() - method_start
+            avg_caption_time = sum(caption_times) / len(caption_times) if caption_times else 0
+            print(f"   ⏱️  TOTAL _extract_images_from_pdf: {method_total:.2f}s")
+            print(f"      - Extracted {image_count} images")
+            print(f"      - Average caption time: {avg_caption_time:.2f}s per image")
+            print(f"      - Total caption time: {sum(caption_times):.2f}s")
+            
             return image_data
             
         except Exception as e:
@@ -1170,14 +1253,14 @@ class PDFProcessingService:
         collection_name = f"pdf_{pdf_id}_images"
 
         ug = PGEngine.from_connection_string(url=connection_string)
+        ug.init_vectorstore_table(table_name=collection_name,vector_size=1536)
         # Use PGVector with student-specific connection
-        vector_store = PGVectorStore(
-            embeddings=embeddings,
-            collection_name=collection_name,
-            connection=connection_string,
-            use_jsonb=True
+        vector_store = PGVectorStore.create_sync(
+            engine=ug,
+            embedding_service=embeddings,
+            table_name=collection_name,
         )
-        
+
         # Convert image captions to documents for vector storage
         from langchain_core.documents import Document
         
@@ -1242,7 +1325,7 @@ class PDFQuestionGenerationService:
             pdf_io.name = "input_document.pdf"
 
             # Configure Gemini client
-            gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            gemini_client = genai.Client(api_key=settings.GOOGLE_API_KEY)
 
             # Upload PDF using Gemini File API
             uploaded_file = gemini_client.files.upload(
@@ -1476,7 +1559,7 @@ IMPORTANT: FOR all text-based questions (VERY_SHORT_ANSWER, SHORT_ANSWER, LONG_A
         """
         try:
             # Configure Gemini client
-            client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            client = genai.Client(api_key=settings.GOOGLE_API_KEY)
             
             # Create prompt for JSON cleaning
             cleaning_prompt = f"""

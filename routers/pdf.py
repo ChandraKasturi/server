@@ -587,86 +587,104 @@ async def websocket_processing_status(
             pass
 
 
-@router.post("/{pdf_id}/learn", response_model=PDFLearnResponse)
-async def learn_from_pdf(
-    pdf_id: str,
-    request_body: PDFLearnRequest,
-    request: Request,
-    x_auth_session: Optional[str] = Header(None),
-    user_id: str = Depends(auth_middleware)
+@router.websocket("/{pdf_id}/learn")
+async def learn_from_pdf_websocket(
+    websocket: WebSocket,
+    pdf_id: str
 ):
-    """Learn from a PDF by asking questions about its content.
+    """WebSocket endpoint for streaming learning responses from PDF.
+    
+    Requires authentication via query parameter: ?x-auth-session=<jwt_token>
     
     Args:
-        pdf_id: ID of the PDF document
-        request_body: Request body containing the question and optional parameters
-        request: The request object
-        x_auth_session: JWT token for authentication
-        user_id: User ID extracted from JWT token
-        
-    Returns:
-        UGJSONResponse with answer to the question
+        websocket: WebSocket connection
+        pdf_id: ID of the PDF document to learn from
     """
+    # Extract token from query parameters manually
+    query_params = dict(websocket.query_params)
+    token = query_params.get("x-auth-session", None)
+    
+    # Authenticate before accepting connection
+    if not token:
+        await websocket.close(code=1008, reason="No authentication token provided")
+        return
+    
+    # Verify token and get student_id
+    from services.auth.auth_service import AuthService
+    auth_service = AuthService()
+    student_id = auth_service.verify_token(token)
+    
+    if not student_id:
+        await websocket.close(code=1008, reason="Invalid or expired token")
+        return
+    
+    # Verify PDF exists and check authorization BEFORE accepting connection
+    pdf = pdf_upload_service.get_pdf(pdf_id)
+    
+    if not pdf:
+        await websocket.close(code=1008, reason="PDF not found")
+        return
+    
+    if pdf.user_id != student_id:
+        await websocket.close(code=1008, reason="You don't have permission to learn from this PDF")
+        return
+    
+    if pdf.processing_status != "completed":
+        await websocket.close(code=1008, reason="PDF has not been fully processed yet")
+        return
+    
+    # Accept connection after successful authentication and validation
+    await websocket.accept()
+    
     try:
-        # Get the PDF document
-        pdf = pdf_upload_service.get_pdf(pdf_id)
+        # Receive initial message with question
+        data = await websocket.receive_text()
+        request_data = json.loads(data)
         
-        if not pdf:
-            return UGJSONResponse(
-                data={},
-                message="PDF not found",
-                status_code=404
-            )
-            
-        # Check authorization
-        if pdf.user_id != user_id:
-            return UGJSONResponse(
-                data={},
-                message="You don't have permission to learn from this PDF",
-                status_code=403
-            )
-            
-        # Check if PDF has been processed
-        if pdf.processing_status != "completed":
-            return UGJSONResponse(
-                data={},
-                message="PDF has not been fully processed yet. Please wait until processing is complete before learning from it.",
-                status_code=400
-            )
-            
-        # Get question and parameters from the request body model
-        question = request_body.question
-        similarity_threshold = request_body.similarity_threshold
+        # Extract parameters
+        question = request_data.get("question")
+        similarity_threshold = request_data.get("similarity_threshold", 0.75)
         
-        # Use LangchainService to answer the question
-        response, status_code = await langchain_service.learn_from_pdf(
-            student_id=user_id,
+        # session_id can be provided in message or default to token
+        session_id = request_data.get("session_id", token)
+        
+        # Validate required fields
+        if not question:
+            await websocket.send_json({
+                "type": "error",
+                "content": "Missing required field: question"
+            })
+            await websocket.close()
+            return
+        
+        # Stream response using authenticated student_id
+        async for chunk in langchain_service.learn_from_pdf_stream(
+            student_id=student_id,
             pdf_id=pdf_id,
             question=question,
-            session_id=x_auth_session,
-            similarity_threshold=similarity_threshold or 0.75  # Use default if not provided
-        )
+            session_id=session_id,
+            similarity_threshold=similarity_threshold
+        ):
+            await websocket.send_json(chunk)
         
-        if status_code != 200:
-            # Handle error case - response is a string message
-            return UGJSONResponse(
-                data={},
-                message=response if isinstance(response, str) else "Error processing request",
-                status_code=status_code
-            )
-        
-        # Return the structured response directly
-        return UGJSONResponse(
-            data=response,
-            message="Learning answer generated successfully"
-        )
-        
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected for PDF: {pdf_id}, student: {student_id}")
+    except json.JSONDecodeError as e:
+        await websocket.send_json({
+            "type": "error",
+            "content": f"Invalid JSON format: {str(e)}"
+        })
     except Exception as e:
-        return UGJSONResponse(
-            data={},
-            message=f"Error learning from PDF: {str(e)}",
-            status_code=500
-        )
+        print(f"Error in PDF WebSocket for student {student_id}: {str(e)}")
+        await websocket.send_json({
+            "type": "error",
+            "content": f"Error in WebSocket connection: {str(e)}"
+        })
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
 
 
 @router.post("/generate-questions", response_model=PDFQuestionGenerationResponse)
