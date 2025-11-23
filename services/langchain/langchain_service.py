@@ -19,6 +19,11 @@ import json
 from langchain_core.messages import HumanMessage, AIMessage
 import asyncio
 import concurrent.futures
+import queue
+import threading
+from openai import OpenAI
+from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
+from openai.types.responses.response_text_done_event import ResponseTextDoneEvent
 
 from config import settings
 from repositories.pgvector_repository import LangchainVectorRepository
@@ -42,6 +47,9 @@ class LangchainService:
         self.ug_llm = ChatOpenAI(openai_api_key=self.openai_api_key, model="gpt-4o")
         '''self.llm = ChatGoogleGenerativeAI(google_api_key=self.google_api_key, model="gemini-2.0-flash")
         self.ug_llm = ChatGoogleGenerativeAI(google_api_key=self.google_api_key, model="gemini-2.0-flash")'''
+        
+        # OpenAI client for streaming
+        self.openai_client = OpenAI(api_key=self.openai_api_key)
         
 
         # Google models (commented out but available)
@@ -448,10 +456,10 @@ class LangchainService:
             )
             
             # Create a retriever from the vector store
-            pdf_retriever = pdf_vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 5})
+            """pdf_retriever = pdf_vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 5})"""
             
             # Get relevant documents for the question
-            return pdf_retriever.get_relevant_documents(question)
+            return pdf_vector_store.similarity_search(question, k=5)
         
         # Run the synchronous operation in a thread pool
         loop = asyncio.get_event_loop()
@@ -529,6 +537,54 @@ class LangchainService:
                 history_size=10
             )
         return get_history
+    
+    def _setup_pdf_chat_history(self, student_id: str, session_id: str, pdf_id: str) -> MongoDBChatMessageHistory:
+        """Set up a MongoDB-based chat history for PDF learning.
+        
+        Args:
+            student_id: ID of the student
+            session_id: JWT token from X-Auth-Session
+            pdf_id: ID of the PDF document
+            
+        Returns:
+            MongoDBChatMessageHistory instance
+        """
+        collection_name = f"{settings.MONGO_DATABASE_HISTORY}_{pdf_id}"
+        return MongoDBChatMessageHistory(
+            connection_string=settings.MONGO_URI,
+            database_name=student_id,
+            collection_name=collection_name,
+            session_id=session_id,
+            history_size=settings.MONGO_HISTORY_SIZE
+        )
+    
+    def _convert_chat_history_to_openai_format(self, history: MongoDBChatMessageHistory) -> List[Dict[str, str]]:
+        """Convert MongoDBChatMessageHistory to OpenAI chat format.
+        
+        Args:
+            history: MongoDBChatMessageHistory instance
+            
+        Returns:
+            List of messages in OpenAI format with role and content
+        """
+        openai_messages = []
+        
+        for message in history.messages:
+            # Determine role based on message type
+            if message.type == "human":
+                role = "user"
+            elif message.type == "ai":
+                role = "assistant"
+            else:
+                # Default to user for unknown types
+                role = "user"
+            
+            openai_messages.append({
+                "role": role,
+                "content": message.content
+            })
+        
+        return openai_messages
 
     async def _run_pdf_chain_async(self, chain_with_history, chain_input: Dict, config: Dict) -> str:
         """Async version of running the PDF learning chain with history.
@@ -548,9 +604,9 @@ class LangchainService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.thread_pool, _run_chain_sync)
 
-    async def learn_from_pdf(self, student_id: str, pdf_id: str, question: str, 
-                  session_id: str = None, similarity_threshold: float = 0.75) -> Tuple[Dict, int]:
-        """Learn from a specific PDF document using RAG (async version).
+    async def learn_from_pdf_stream(self, student_id: str, pdf_id: str, question: str, 
+                  session_id: str = None, similarity_threshold: float = 0.75):
+        """Learn from a specific PDF document using RAG with streaming (async generator).
         
         Args:
             student_id: ID of the student
@@ -559,8 +615,8 @@ class LangchainService:
             session_id: Optional session ID for chat history
             similarity_threshold: Minimum similarity score for images (0-1, where lower is more similar for distance metrics)
             
-        Returns:
-            Tuple of (response_data, status_code)
+        Yields:
+            Streamed response chunks
         """
         try:
             # Create a collection name specific to this PDF
@@ -569,7 +625,6 @@ class LangchainService:
             images_collection_name = f"pdf_{pdf_id}_images"
             
             # Create student-specific connection string
-            # Format: postgresql+psycopg://myuser:mypassword@localhost:5432/student_{user_id}
             base_connection = settings.POSTGRES_CONNECTION_STRING
             
             # Parse the base connection string to insert student_id
@@ -601,7 +656,11 @@ class LangchainService:
             
             # If no context was retrieved, return an error
             if not context:
-                return "I couldn't find relevant information in this PDF to answer your question. Please try a different question or check if the PDF has been processed correctly.", 404
+                yield {
+                    "type": "error",
+                    "content": "I couldn't find relevant information in this PDF to answer your question. Please try a different question or check if the PDF has been processed correctly."
+                }
+                return
             
             # Find relevant images for the question (async)
             relevant_image = await self._find_relevant_image_async(
@@ -611,66 +670,126 @@ class LangchainService:
                 similarity_threshold
             )
             
-            # Create prompt template with context, history, and potential image reference
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", "You are an educational assistant helping a student learn from a specific PDF document. "
-                          "Use only the provided context from the PDF to answer the question. "
-                          "If the answer isn't in the context, acknowledge this and suggest what might be relevant. "
-                          "If an image is provided, incorporate it into your explanation and mention that there's a visual reference available. "
-                          "Keep your answers clear, educational, and directly related to the PDF content.\n\n"
-                          "Context from the PDF:\n{context}"),
-                MessagesPlaceholder(variable_name="history"),
-                ("human", "{question}")
-            ])
-            
-            # Create chain
-            chain = prompt | self.ug_llm | StrOutputParser()
-            
-            # Prepare input for the chain
-            chain_input = {
-                "context": context,
-                "question": question
-            }
-            
-            # Create structured response
-            response = {
-                "answer": "",
-                "has_image": relevant_image is not None
-            }
-            
-            # Add image information to the response if available
+            # Send image metadata first if available
             if relevant_image:
-                response["image_url"] = relevant_image["image_url"]
-                response["image_caption"] = relevant_image["caption"]
-                response["image_page"] = relevant_image.get("page_number")
+                yield {
+                    "type": "image",
+                    "content": {
+                        "image_url": relevant_image["image_url"],
+                        "image_caption": relevant_image["caption"],
+                        "image_page": relevant_image.get("page_number"),
+                        "score": relevant_image.get("score")
+                    }
+                }
             
-            # Run chain with history if session_id is provided, otherwise without history
+            # Build system message with context
+            system_message_content = (
+                "You are an educational assistant helping a student learn from a specific PDF document. "
+                "Use only the provided context from the PDF to answer the question. "
+                "If the answer isn't in the context, acknowledge this and suggest what might be relevant. "
+                "If an image is provided, incorporate it into your explanation and mention that there's a visual reference available. "
+                "Keep your answers clear, educational, and directly related to the PDF content.\n\n"
+                f"Context from the PDF:\n{context}"
+            )
+            
+            # Prepare OpenAI messages
+            messages = [
+                {"role": "system", "content": system_message_content}
+            ]
+            
+            # Get chat history if session_id is provided
             if session_id:
-                # Create chain with message history
-                chain_with_history = RunnableWithMessageHistory(
-                    chain,
-                    self._get_pdf_session_history(student_id, pdf_id),
-                    input_messages_key="question",
-                    history_messages_key="history",
-                )
-                
-                # Configure session
-                config = {"configurable": {"session_id": session_id}}
-                
-                # Run chain with history (async)
-                answer = await self._run_pdf_chain_async(chain_with_history, chain_input, config)
-            else:
-                # Fallback: run without history if no session_id (async)
-                chain_input["history"] = []  # Empty history
-                answer = await self._run_chain_async(chain, chain_input)
+                chat_history = self._setup_pdf_chat_history(student_id, session_id, pdf_id)
+                history_messages = self._convert_chat_history_to_openai_format(chat_history)
+                messages.extend(history_messages)
             
-            # Set the answer in response
-            response["answer"] = answer
+            # Add current question
+            messages.append({"role": "user", "content": question})
             
-            return response, 200
+            # Stream response from OpenAI using responses.create()
+            full_response = ""
+            
+            # Use a queue to pass events from sync iterator to async generator
+            event_queue = queue.Queue()
+            exception_holder = []
+            
+            def stream_in_thread():
+                """Run OpenAI streaming in a separate thread to avoid blocking."""
+                try:
+                    stream = self.openai_client.responses.create(
+                        model="gpt-4o",
+                        input=messages,
+                        stream=True
+                    )
+                    
+                    for event in stream:
+                        event_queue.put(("event", event))
+                    
+                    # Signal completion
+                    event_queue.put(("done", None))
+                except Exception as e:
+                    exception_holder.append(e)
+                    event_queue.put(("error", str(e)))
+            
+            # Start streaming in background thread
+            stream_thread = threading.Thread(target=stream_in_thread, daemon=True)
+            stream_thread.start()
+            
+            # Process events from queue asynchronously
+            while True:
+                # Check queue in non-blocking way
+                try:
+                    event_type, event_data = await asyncio.get_event_loop().run_in_executor(
+                        None, event_queue.get, True, 0.1  # 100ms timeout
+                    )
+                except queue.Empty:
+                    # Give control back to event loop
+                    await asyncio.sleep(0)
+                    continue
+                
+                if event_type == "done":
+                    break
+                elif event_type == "error":
+                    if exception_holder:
+                        raise exception_holder[0]
+                    break
+                elif event_type == "event":
+                    event = event_data
+                    # Handle ResponseTextDeltaEvent for streaming chunks
+                    if isinstance(event, ResponseTextDeltaEvent):
+                        content = event.delta
+                        full_response += content
+                        # Yield immediately
+                        yield {
+                            "type": "content",
+                            "content": content
+                        }
+                        # Give control back to event loop to allow WebSocket to send
+                        await asyncio.sleep(0)
+                    # Handle ResponseTextDoneEvent for completion
+                    elif isinstance(event, ResponseTextDoneEvent):
+                        if event.text != full_response:
+                            print(f"Warning: Accumulated response differs from final text!")
+            
+            # Add messages to chat history if session_id provided
+            if session_id:
+                chat_history = self._setup_pdf_chat_history(student_id, session_id, pdf_id)
+                chat_history.add_message(HumanMessage(content=question))
+                chat_history.add_message(AIMessage(content=full_response))
+            
+            # Send completion signal
+            yield {
+                "type": "done",
+                "content": ""
+            }
             
         except Exception as e:
-            return f"Error learning from PDF: {str(e)}", 500
+            error_message = f"Error learning from PDF: {str(e)}"
+            print(error_message)
+            yield {
+                "type": "error",
+                "content": error_message
+            }
             
     def _find_relevant_image(self, connection_string: str, collection_name: str, query: str, similarity_threshold: float = 0.4) -> Optional[Dict]:
         """Find a relevant image for the query from the image captions collection.
