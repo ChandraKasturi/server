@@ -64,6 +64,7 @@ class NotificationService:
             template = Template(template_content)
             return template.render(**context)
         except Exception:
+            print(f"Error rendering template {template_path}: {traceback.format_exc()}")
             # Fallback template for robustness
             fallback_template = """
             <html>
@@ -94,7 +95,7 @@ class NotificationService:
                 {"token": token}
             )
             
-            subject = "Welcome to Sahasra AI - Use This OTP to Get Started"
+            subject = "Welcome to Notutor AI - Use This OTP to Get Started"
             
             return self.send_email(email, subject, html_content)
         except Exception:
@@ -117,7 +118,7 @@ class NotificationService:
                 {"otp": token}
             )
             
-            subject = "Forgot Password"
+            subject = "Notutor AI - Forgot Password"
             
             return self.send_email(email, subject, html_content)
         except Exception:
@@ -230,7 +231,7 @@ class NotificationService:
             
             return self.send_email(
                 to_email=new_email,
-                subject="Sahasra AI - Verify Your New Email Address",
+                subject="Notutor AI - Verify Your New Email Address",
                 html_content=html_content
             )
         except Exception:
