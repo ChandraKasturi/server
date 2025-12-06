@@ -1,5 +1,6 @@
 import os
 import requests
+import traceback
 from jinja2 import Template
 from typing import Dict, Optional, Any
 
@@ -43,6 +44,7 @@ class NotificationService:
             print(f"Email sent to {to_email} with status code {response.status_code} and response {response.text}")
             return response.status_code == 200
         except Exception:
+            print(f"Error sending email to {to_email}: {traceback.format_exc()}")
             return False
     
     def _render_template(self, template_path: str, context: Dict[str, Any]) -> str:
@@ -96,6 +98,7 @@ class NotificationService:
             
             return self.send_email(email, subject, html_content)
         except Exception:
+            print(f"Error sending registration OTP email to {email}: {traceback.format_exc()}")
             return False
     
     def send_password_reset_email(self, email: str, token: str) -> bool:
@@ -118,6 +121,7 @@ class NotificationService:
             
             return self.send_email(email, subject, html_content)
         except Exception:
+            print(f"Error sending password reset email to {email}: {traceback.format_exc()}")
             return False
     
     def send_sms(self, phone_number: str, message: str, template_id: str) -> bool:
@@ -230,4 +234,5 @@ class NotificationService:
                 html_content=html_content
             )
         except Exception:
+            print(f"Error sending email verification email to {new_email}: {traceback.format_exc()}")
             return False 
