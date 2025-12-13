@@ -129,7 +129,7 @@ class AuthService:
         
         # Send notifications
         self.notification_service.send_registration_otp_email(email, token)
-        """self.notification_service.send_registration_otp_sms(phone_number, token)"""
+        self.notification_service.send_registration_otp_sms(phone_number, token)
         
         return "Register Token Has been sent to your Email ID Or MobileNumber Please Use it to Confirm Your Registration", 200
     
@@ -197,7 +197,7 @@ class AuthService:
             if '@' in email_or_mobile:
                 self.notification_service.send_password_reset_email(email_or_mobile, token)
             else:
-                self.notification_service.send_password_reset_email(email_or_mobile, token)
+                self.notification_service.send_password_reset_sms(email_or_mobile, token)
                 
             return "If the Email or PhoneNumber You Provided Exists in our Database The reset Link Should be in Your Inbox Please Check your mail or Mobile", 200
         except Exception:
