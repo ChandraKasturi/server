@@ -164,7 +164,7 @@ class NotificationService:
         Returns:
             True if successful, False otherwise
         """
-        message = f"Your Sahasra signup OTP is {token}. Please enter this code to verify your mobile number. The code is valid for 10 minutes. Do not share it with anyone."
+        message = f"Your NoTutor OTP is {token}. Valid for 10 minutes. Powered by Sahasra Services. - SAHAAI www.sahasra.ai"
         
         return self.send_sms(
             phone_number, 
@@ -182,7 +182,7 @@ class NotificationService:
         Returns:
             True if successful, False otherwise
         """
-        message = f"Your Sahasra password reset OTP is {token}. Please enter this code to reset your password. The code is valid for 10 minutes. Do not share it with anyone."
+        message = f"Your NoTutor OTP is {token}. Valid for 10 minutes. Powered by Sahasra Services. - SAHAAI www.sahasra.ai"
         
         return self.send_sms(
             phone_number, 
@@ -200,7 +200,7 @@ class NotificationService:
         Returns:
             True if successful, False otherwise
         """
-        message = f"Your Sahasra OTP is {token}. Please enter this code to verify your mobile number. The code is valid for 10 minutes. Do not share"
+        message = f"Your NoTutor OTP is {token}. Valid for 10 minutes. Powered by Sahasra Services. - SAHAAI www.sahasra.ai"
         
         return self.send_sms(
             phone_number, 
