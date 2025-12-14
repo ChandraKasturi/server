@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from typing import List, Optional, Dict, Any, Union
 import json
 import redis.asyncio as redis
+import pypdf
 import httpx
 import asyncio
 from datetime import datetime
@@ -154,7 +155,13 @@ async def upload_pdf(
                 message=f"Invalid file format. Only {', '.join(settings.PDF_UPLOAD_EXTENSIONS)} files are allowed",
                 status_code=400
             )
-        
+        pages_ug = len(pypdf.PdfReader(file.file).pages)
+        if pages_ug > settings.PDF_MAX_PAGES:
+            return UGJSONResponse(
+                data={},
+                message=f"PDF has too many pages. Maximum is {settings.PDF_MAX_PAGES}",
+                status_code=400
+            )
         # Create upload request model
         upload_request = PDFUploadRequest(
             title=title,
