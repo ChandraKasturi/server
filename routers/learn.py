@@ -758,7 +758,6 @@ async def upload_learning_image(
         # Use the learning service to upload and process the image
         result, status_code = await learning_service.upload_learning_image(
             file=file,
-            user_id=user_id,
             caption=caption,
             subject=subject,
             topic=topic,
