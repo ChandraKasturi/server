@@ -1,1 +1,17 @@
 node_modules
+# virtualenv
+venv/
+.venv/
+
+# python cache
+__pycache__/
+*.pyc
+
+# build artifacts
+*.so
+*.pyd
+*.dylib
+
+# misc
+.env
+.DS_Store
