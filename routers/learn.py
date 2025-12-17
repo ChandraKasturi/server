@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from typing import Optional
 from datetime import datetime, timedelta
 import json
+import asyncio
 
 from models.pdf_models import (SubjectLearnRequest, TTSRequest, LearningPDFUploadRequest, 
                               LearningPDFUploadResponse, LearningPDFProcessingStatus,
@@ -15,6 +16,7 @@ from services.learning.tts_service import TTSService
 from services.auth.auth_service import AuthService
 from routers.auth import auth_middleware
 from utils.json_response import UGJSONResponse
+from middleware.generic_guard import guard_decision
 
 # Create router
 router = APIRouter(prefix="/api/learn", tags=["Learning"])
@@ -779,7 +781,10 @@ async def upload_learning_image(
             },
             status_code=500
         )
-
+async def send_text_as_content(websocket: WebSocket, text: str):
+    # send as small chunks similar to your existing stream
+    for token in text.split(" "):
+        await websocket.send_json({"type": "content", "content": token + " "})
 
 # WebSocket endpoint for streaming responses
 @router.websocket("/ws/{subject}")
@@ -822,6 +827,15 @@ async def learn_subject_websocket(
         
         # Extract parameters
         question = request_data.get("question")
+        decision = guard_decision(question or "")
+        if not decision["allow"]:
+            msg = "⚠️ " + decision["message"]
+            await send_text_as_content(websocket, msg)
+            await websocket.send_json({"type": "content", "content": "\n"})
+            await asyncio.sleep(0.1)
+            await websocket.close(code=1000)
+            return
+
         include_pdfs = request_data.get("include_pdfs", True)
         include_images = request_data.get("include_images", True)
         
