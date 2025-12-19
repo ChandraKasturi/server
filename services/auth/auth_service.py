@@ -160,6 +160,18 @@ class AuthService:
         user_data = register_data.copy()
         user_data["student_id"] = student_id
         
+        # Normalize coupon_code: trim + uppercase; discard if empty or None
+        coupon_code = user_data.get("coupon_code")
+        if coupon_code is not None:
+            normalized = coupon_code.strip().upper()
+            if normalized:
+                user_data["coupon_code"] = normalized
+            else:
+                user_data.pop("coupon_code", None)
+        else:
+            # Remove key entirely when None so we don't store null
+            user_data.pop("coupon_code", None)
+        
         try:
             # Insert user into database
             self.user_repo.insert_user(user_data)
