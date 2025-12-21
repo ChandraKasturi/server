@@ -35,10 +35,7 @@ class confirmRegisterUmodel(BaseModel):
 	Class: str
 	educationboard: str
 	token:str
-<<<<<<< HEAD
-=======
 	coupon_code: Optional[str] = None
->>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
 
 
 class UpdatePasswordUmodel(BaseModel):
