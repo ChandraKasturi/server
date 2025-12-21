@@ -13,11 +13,7 @@ import os
 import av
 import numpy as np
 import soundfile as sf
-<<<<<<< HEAD
 from kokoro import KPipeline, KModel
-=======
-
->>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
 
 
 # Settings for text chunking
@@ -333,11 +329,7 @@ class TTSService:
     
     def __init__(self):
         """Initialize the TTS service."""
-<<<<<<< HEAD
         self.pipeline = KPipeline(lang_code='a')
-=======
-       # self.pipeline = KPipeline(model=KModel.KOKORO_V2_1_2B, lang_code='a')
->>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
         # Thread pool for blocking operations
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         print("TTS service initialized with soundfile for audio transformation")
