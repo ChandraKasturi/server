@@ -222,11 +222,7 @@ class PDFProcessingService:
         
         while True:
             try:
-<<<<<<< HEAD
                 print(f"Redis Client: {self.redis_client}")
-=======
-                #print(f"Redis Client: {self.redis_client}")
->>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                 # Get the highest priority task from Redis sorted set
                 tasks = await self.redis_client.zpopmax("pdf_processing_queue", 1)
                 
@@ -369,6 +365,28 @@ class PDFProcessingService:
                 # Publish error event
                 await self._publish_status_update(pdf_document.id, error_status)
     
+    def _write_timing_log(self, pdf_id: str, log_message: str):
+        """Write timing log to a file for the PDF.
+        
+        Args:
+            pdf_id: ID of the PDF document
+            log_message: Log message to write
+        """
+        try:
+            # Create logs directory if it doesn't exist
+            logs_dir = os.path.join(settings.static_dir_path, "pdf_logs")
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            # Create log file path
+            log_file_path = os.path.join(logs_dir, f"pdf_{pdf_id}_timing.log")
+            
+            # Write log message with timestamp
+            with open(log_file_path, "a", encoding="utf-8") as log_file:
+                timestamp = datetime.utcnow().isoformat()
+                log_file.write(f"[{timestamp}] {log_message}\n")
+        except Exception as e:
+            print(f"Warning: Could not write timing log: {str(e)}")
+    
     async def process_pdf(self, pdf_document: PDFDocument, user_id: str) -> bool:
         """Process a PDF document and store its contents (async version).
         
@@ -386,9 +404,14 @@ class PDFProcessingService:
         
         # ⏱️ START TOTAL TIMING
         total_start_time = time.time()
-        print(f"\n{'='*80}")
-        print(f"⏱️ [TIMING] Starting PDF processing for {pdf_id}")
-        print(f"{'='*80}\n")
+        header = f"\n{'='*80}\n⏱️ [TIMING] Starting PDF processing for {pdf_id}\n{'='*80}\n"
+        print(header)
+        self._write_timing_log(pdf_id, f"{'='*80}")
+        self._write_timing_log(pdf_id, f"Starting PDF processing")
+        self._write_timing_log(pdf_id, f"PDF ID: {pdf_id}")
+        self._write_timing_log(pdf_id, f"User ID: {user_id}")
+        self._write_timing_log(pdf_id, f"File Path: {file_path}")
+        self._write_timing_log(pdf_id, f"{'='*80}")
         
         try:
             # Update processing status (async)
@@ -428,7 +451,9 @@ class PDFProcessingService:
             
             image_data = await self._extract_images_from_pdf_async(file_path, user_id, pdf_id)
             step_time = time.time() - step_start
-            print(f"⏱️ [TIMING] Image extraction: {step_time:.2f}s (extracted {len(image_data)} images)")
+            log_msg = f"⏱️ [TIMING] Image extraction: {step_time:.2f}s (extracted {len(image_data)} images)"
+            print(log_msg)
+            self._write_timing_log(pdf_id, log_msg)
             
             # Extract text from PDF (async)
             try:
@@ -446,9 +471,15 @@ class PDFProcessingService:
                 
                 chunks, page_count = await self._extract_text_async(file_path)
                 step_time = time.time() - step_start
-                print(f"⏱️ [TIMING] Text extraction: {step_time:.2f}s")
-                print(f"   - Extracted {len(chunks)} chunks from {page_count} pages")
-                print(f"   - Average: {step_time/page_count:.2f}s per page")
+                log_msg1 = f"⏱️ [TIMING] Text extraction: {step_time:.2f}s"
+                log_msg2 = f"   - Extracted {len(chunks)} chunks from {page_count} pages"
+                log_msg3 = f"   - Average: {step_time/page_count:.2f}s per page"
+                print(log_msg1)
+                print(log_msg2)
+                print(log_msg3)
+                self._write_timing_log(pdf_id, log_msg1)
+                self._write_timing_log(pdf_id, log_msg2)
+                self._write_timing_log(pdf_id, log_msg3)
                 
                 # Store the full text in PostgreSQL for the specific user (async)
                 step_start = time.time()
@@ -465,7 +496,9 @@ class PDFProcessingService:
                     metadata=pdf_document.metadata.dict() if pdf_document.metadata else {}
                 )
                 step_time = time.time() - step_start
-                print(f"⏱️ [TIMING] Store full text in Postgres: {step_time:.2f}s")
+                log_msg = f"⏱️ [TIMING] Store full text in Postgres: {step_time:.2f}s"
+                print(log_msg)
+                self._write_timing_log(pdf_id, log_msg)
                 
                 # Store chunks in the user's database (async)
                 step_start = time.time()
@@ -477,7 +510,9 @@ class PDFProcessingService:
                 
                 await self._store_pdf_chunks_async(user_id, pdf_id, chunk_data)
                 step_time = time.time() - step_start
-                print(f"⏱️ [TIMING] Store chunks in Postgres: {step_time:.2f}s ({len(chunk_data)} chunks)")
+                log_msg = f"⏱️ [TIMING] Store chunks in Postgres: {step_time:.2f}s ({len(chunk_data)} chunks)"
+                print(log_msg)
+                self._write_timing_log(pdf_id, log_msg)
                 
                 # Convert chunks to PDFChunk objects and store in MongoDB (async)
                 step_start = time.time()
@@ -505,7 +540,9 @@ class PDFProcessingService:
                     await self._save_pdf_chunk_async(chunk_obj)
                     pdf_chunks.append(chunk_obj)
                 step_time = time.time() - step_start
-                print(f"⏱️ [TIMING] Store chunks in MongoDB: {step_time:.2f}s ({len(pdf_chunks)} chunks)")
+                log_msg = f"⏱️ [TIMING] Store chunks in MongoDB: {step_time:.2f}s ({len(pdf_chunks)} chunks)"
+                print(log_msg)
+                self._write_timing_log(pdf_id, log_msg)
                 
                 # Process image captions (async)
                 if image_data:
@@ -525,7 +562,9 @@ class PDFProcessingService:
                     # Store image captions in PGVector with a separate collection (async)
                     await self._store_image_captions_in_vector_db_async(pdf_id, image_data, user_id)
                     step_time = time.time() - step_start
-                    print(f"⏱️ [TIMING] Store image captions in vector DB: {step_time:.2f}s ({len(image_data)} images)")
+                    log_msg = f"⏱️ [TIMING] Store image captions in vector DB: {step_time:.2f}s ({len(image_data)} images)"
+                    print(log_msg)
+                    self._write_timing_log(pdf_id, log_msg)
                 
                 # Store chunks in vector DB for semantic search (async)
                 step_start = time.time()
@@ -542,7 +581,9 @@ class PDFProcessingService:
                 
                 await self._store_chunks_in_vector_db_async(pdf_id, pdf_chunks, user_id)
                 step_time = time.time() - step_start
-                print(f"⏱️ [TIMING] Store chunks in vector DB (with embeddings): {step_time:.2f}s ({len(pdf_chunks)} chunks)")
+                log_msg = f"⏱️ [TIMING] Store chunks in vector DB (with embeddings): {step_time:.2f}s ({len(pdf_chunks)} chunks)"
+                print(log_msg)
+                self._write_timing_log(pdf_id, log_msg)
                 
                 # Update processing status to completed (async)
                 step_start = time.time()
@@ -580,7 +621,9 @@ class PDFProcessingService:
                 # Publish completion event
                 await self._publish_status_update(pdf_id, completion_status)
                 step_time = time.time() - step_start
-                print(f"⏱️ [TIMING] Finalization and status update: {step_time:.2f}s")
+                log_msg = f"⏱️ [TIMING] Finalization and status update: {step_time:.2f}s"
+                print(log_msg)
+                self._write_timing_log(pdf_id, log_msg)
                 
                 # ⏱️ TOTAL TIME SUMMARY
                 total_time = time.time() - total_start_time
@@ -593,6 +636,16 @@ class PDFProcessingService:
                 print(f"   - Average per page: {total_time/page_count:.2f}s")
                 print(f"{'='*80}\n")
                 
+                # Write final summary to log file
+                self._write_timing_log(pdf_id, f"{'='*80}")
+                self._write_timing_log(pdf_id, f"✅ PDF processing completed successfully")
+                self._write_timing_log(pdf_id, f"⏱️ TOTAL TIME: {total_time:.2f}s ({total_time/60:.2f} minutes)")
+                self._write_timing_log(pdf_id, f"   - Pages processed: {page_count}")
+                self._write_timing_log(pdf_id, f"   - Chunks created: {len(pdf_chunks)}")
+                self._write_timing_log(pdf_id, f"   - Images extracted: {len(image_data)}")
+                self._write_timing_log(pdf_id, f"   - Average per page: {total_time/page_count:.2f}s")
+                self._write_timing_log(pdf_id, f"{'='*80}")
+                
                 return True
                 
             except Exception as e:
@@ -602,6 +655,12 @@ class PDFProcessingService:
                 print(f"❌ [TIMING] PDF processing FAILED for {pdf_id} after {error_time:.2f}s")
                 print(f"   Error: {error_message}")
                 print(f"{'='*80}\n")
+                
+                # Write error to log file
+                self._write_timing_log(pdf_id, f"{'='*80}")
+                self._write_timing_log(pdf_id, f"❌ PDF processing FAILED after {error_time:.2f}s")
+                self._write_timing_log(pdf_id, f"   Error: {error_message}")
+                self._write_timing_log(pdf_id, f"{'='*80}")
                 
                 # Update processing status to failed (async)
                 await self._update_pdf_status_async(pdf_id, ProcessingStatus.FAILED, error_message)
@@ -639,6 +698,12 @@ class PDFProcessingService:
             print(f"❌ [TIMING] PDF processing FAILED (unexpected) for {pdf_id} after {error_time:.2f}s")
             print(f"   Error: {error_message}")
             print(f"{'='*80}\n")
+            
+            # Write unexpected error to log file
+            self._write_timing_log(pdf_id, f"{'='*80}")
+            self._write_timing_log(pdf_id, f"❌ PDF processing FAILED (unexpected) after {error_time:.2f}s")
+            self._write_timing_log(pdf_id, f"   Error: {error_message}")
+            self._write_timing_log(pdf_id, f"{'='*80}")
             
             # Update processing status to failed (async)
             await self._update_pdf_status_async(pdf_id, ProcessingStatus.FAILED, error_message)
@@ -882,7 +947,7 @@ class PDFProcessingService:
             # Generate content using Gemini
             step_start = time.time()
             response = gemini_client.models.generate_content(
-                model="gemini-2.5-pro",
+                model="gemini-3-flash-preview",
                 contents=[uploaded_file, extraction_prompt]
             )
             
@@ -1184,7 +1249,7 @@ class PDFProcessingService:
                         pil_image = PIL.Image.open(image_filename)
                         # Generate caption
                         response = client.models.generate_content(
-                            model="gemini-2.5-pro",
+                            model="gemini-3-flash-preview",
                             contents=["Write a concise and accurate caption for this image", pil_image]
                         )
                         

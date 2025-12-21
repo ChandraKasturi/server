@@ -24,7 +24,7 @@ import threading
 from openai import OpenAI
 from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
 from openai.types.responses.response_text_done_event import ResponseTextDoneEvent
-
+import httpx
 from config import settings
 from repositories.pgvector_repository import LangchainVectorRepository
 from repositories.pdf_repository import PDFRepository
@@ -653,7 +653,7 @@ class LangchainService:
             # Extract content from retrieved documents
             context_content = [doc.page_content for doc in retrieved_docs]
             context = "\n".join(context_content) if context_content else ""
-            
+            ug_context = "RELEVANT DOCUMENT IMAGES:\n"
             # If no context was retrieved, return an error
             if not context:
                 yield {
@@ -674,14 +674,26 @@ class LangchainService:
             if relevant_image:
                 yield {
                     "type": "image",
-                    "content": {
-                        "image_url": relevant_image["image_url"],
-                        "image_caption": relevant_image["caption"],
-                        "image_page": relevant_image.get("page_number"),
-                        "score": relevant_image.get("score")
-                    }
+                    "content": relevant_image
+                
                 }
             
+            if relevant_image:
+                validated_images = []
+                
+                for img in relevant_image:
+                    full_image_url = f"{settings.IMAGE_BASE_URL}{img['image_url']}"
+                    is_accessible = await self._check_image_url_accessible(full_image_url)
+                    if is_accessible:
+                        validated_images.append({**img, 'full_url': full_image_url})
+                    if validated_images:
+                        for i in validated_images:
+                            ug_context = ug_context + f"\nImage {i['image_url']}: ![{i['caption']}]({i['full_url']})\n"
+                            ug_context = ug_context + f"Caption: {i['caption']}\n"
+                            ug_context = ug_context + f"Page: {i.get('page_number', 'Unknown')}\n"
+                            
+                        
+                
             # Build system message with context
             system_message_content = (
                 "You are an educational assistant helping a student learn from a specific PDF document. "
@@ -690,6 +702,8 @@ class LangchainService:
                 "If an image is provided, incorporate it into your explanation and mention that there's a visual reference available. "
                 "Keep your answers clear, educational, and directly related to the PDF content.\n\n"
                 f"Context from the PDF:\n{context}"
+                f"Context from the Images:\n{ug_context}"
+                f"include these relevant images in your response using markdown format with the full URLs provided above. Reference them appropriately to enhance your explanation."
             )
             
             # Prepare OpenAI messages
@@ -804,6 +818,7 @@ class LangchainService:
             Dictionary with image information if found, None otherwise
         """
         try:
+            relevant_images = []
             # Try to connect to the image captions collection
             try:
                 ug = PGEngine.from_connection_string(url=connection_string)
@@ -816,32 +831,49 @@ class LangchainService:
                 # Perform similarity search to find relevant image
                 results = image_vector_store.similarity_search_with_score(
                     query, 
-                    k=1  # Get the most relevant image
+                    k=3  # Get the most relevant image
                 )
                 
                 if results and len(results) > 0:
-                    # Extract image information from the document and metadata
-                    doc, score = results[0]
-                    
-                    # Check if the similarity score meets the threshold
-                    # Note: For distance-based metrics, lower scores mean more similar
-                    # For PGVector, scores are typically distance metrics
-                    if score <= similarity_threshold:
-                        if doc.metadata and "image_url" in doc.metadata:
-                            return {
-                                "image_url": doc.metadata["image_url"],
-                                "caption": doc.page_content,
-                                "score": score,
-                                "page_number": doc.metadata.get("page_number")
-                            }
-                    else:
-                        print(f"Image found but similarity score {score} doesn't meet threshold {similarity_threshold}")
-                        return None
+                    for doc, score in results:
+                        if score <= similarity_threshold:
+                            if doc.metadata and "image_url" in doc.metadata:
+                                relevant_images.append({
+                                    "image_url": doc.metadata["image_url"],
+                                    "caption": doc.page_content,
+                                    "score": score,
+                                    "page_number": doc.metadata.get("page_number")
+                                })
+
+                return relevant_images
             except Exception as e:
                 print(f"Error searching for images: {str(e)}")
-                return None
-                
+                return []
         except Exception as e:
             print(f"Error finding relevant image: {str(e)}")
+            return []
+    async def _check_image_url_accessible(self, image_url: str, timeout: float = 3.0) -> bool:
+        """Check if an image URL is accessible and returns 200 status code (async).
+        
+        Args:
+            image_url: URL of the image to check
+            timeout: Request timeout in seconds (default: 3.0)
             
-        return None 
+        Returns:
+            True if the image URL returns 200 status code, False otherwise
+        """
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.head(image_url, follow_redirects=True)
+                if response.status_code == 200:
+                    print(f" Image URL accessible: {image_url}")
+                    return True
+                else:
+                    print(f" Image URL returned status {response.status_code}: {image_url}")
+                    return False
+        except httpx.TimeoutException:
+            print(f" Image URL check timeout: {image_url}")
+            return False
+        except Exception as e:
+            print(f" Error checking image URL {image_url}: {str(e)}")
+            return False

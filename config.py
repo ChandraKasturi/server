@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     PDF_MAX_PAGES: int = 10
     
     # File Paths & URLs
+    IMAGE_BASE_URL: str = "https://aigenix.in"
     STATIC_DIR: str = "static"
     STATIC_ASSET_BASE_URL: str = "https://aigenix.in/static/" # Used in constructing URLs
     STATIC_IMAGE_DIR: str = "images" # Relative to STATIC_DIR

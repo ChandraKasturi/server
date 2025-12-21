@@ -162,6 +162,10 @@ async def upload_pdf(
                 message=f"PDF has too many pages. Maximum is {settings.PDF_MAX_PAGES}",
                 status_code=400
             )
+        
+        # Reset file pointer to beginning after reading
+        file.file.seek(0)
+        
         # Create upload request model
         upload_request = PDFUploadRequest(
             title=title,

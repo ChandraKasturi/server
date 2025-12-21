@@ -5,10 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-<<<<<<< HEAD
-=======
 
->>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
 from config import settings
 from routers import auth, assessment, profile, chat, pdf, learn
 from services.pdf.pdf_service import PDFProcessingService
@@ -38,23 +35,14 @@ allow_origin_regex = (
     r"))$"
 )
 
-<<<<<<< HEAD
-=======
 
 
->>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-<<<<<<< HEAD
-    allow_headers=["X-Auth-Session", "Content-Type","Content-Disposition","Cache-Control","Transfer-Encoding"],
-    expose_headers=["X-Auth-Session"]
-)
-
-=======
     allow_headers=[
         "X-Auth-Session",
         "Content-Type",
@@ -68,7 +56,6 @@ app.add_middleware(
 # Add Generic Guard Middleware
 
 
->>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
 # Mount static directory for serving files
 static_dir = settings.static_dir_path
 if not os.path.exists(static_dir):
