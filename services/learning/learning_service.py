@@ -8,7 +8,10 @@ import io
 import time
 import queue
 import threading
+<<<<<<< HEAD
 import httpx
+=======
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
 from loguru import logger
 from typing import List, Dict, Any, Optional, Tuple, BinaryIO
 from langchain_openai import ChatOpenAI
@@ -430,6 +433,7 @@ class LearningService:
         """
         return []
 
+<<<<<<< HEAD
     async def _check_image_url_accessible(self, image_url: str, timeout: float = 3.0) -> bool:
         """Check if an image URL is accessible and returns 200 status code (async).
         
@@ -456,6 +460,8 @@ class LearningService:
             logger.warning(f"✗ Error checking image URL {image_url}: {str(e)}")
             return False
 
+=======
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
     async def _store_history_async(self, student_id: str, history_data: Dict) -> None:
         """Async version of storing history data.
         
@@ -705,6 +711,10 @@ class LearningService:
             if include_images:
                 retrieval_tasks.append(
                     self._find_relevant_learning_images_async(
+<<<<<<< HEAD
+=======
+                        user_id=student_id,
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                         subject=subject, 
                         query=question,
                         similarity_threshold=0.3,
@@ -762,6 +772,7 @@ class LearningService:
             
             image_context = ""
             if relevant_images:
+<<<<<<< HEAD
                 # Validate image URLs before including them
                 validated_images = []
                 image_check_start = time.time()
@@ -785,6 +796,16 @@ class LearningService:
                         image_context += f"Page: {img.get('page_number', 'Unknown')}\n"
                     
                     image_context += "\nPlease include these relevant images in your response using markdown format with the full URLs provided above. Reference them appropriately to enhance your explanation."
+=======
+                image_context = "\n\nRELEVANT EDUCATIONAL IMAGES:\n"
+                for i, img in enumerate(relevant_images, 1):
+                    full_image_url = f"https://aigenix.in{img['image_url']}"
+                    image_context += f"\nImage {i}: ![{img['caption']}]({full_image_url})\n"
+                    image_context += f"Caption: {img['caption']}\n"
+                    image_context += f"Page: {img.get('page_number', 'Unknown')}\n"
+                
+                image_context += "\nPlease include these relevant images in your response using markdown format with the full URLs provided above. Reference them appropriately to enhance your explanation."
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             
             # Build system message with context
             system_message_content = f"{system_prompt}\n\n" \
@@ -1671,7 +1692,11 @@ class LearningService:
                 chunks, page_count = await self._extract_text_from_pdf_async(temp_file_path)
                 
                 # Extract images from PDF (async)
+<<<<<<< HEAD
                 image_data = await self._extract_images_from_learning_pdf_async(temp_file_path, pdf_id,subject)
+=======
+                image_data = await self._extract_images_from_learning_pdf_async(temp_file_path, user_id, pdf_id)
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                 
                 # Store chunks in subject-specific vector database (async)
                 chunks_created = await self._store_learning_chunks_in_vector_db_async(
@@ -1941,28 +1966,48 @@ class LearningService:
         
         return chunks, num_pages
 
+<<<<<<< HEAD
     async def _extract_images_from_learning_pdf_async(self, pdf_path: str, pdf_id: str, subject: str) -> List[Dict]:
+=======
+    async def _extract_images_from_learning_pdf_async(self, pdf_path: str, user_id: str, pdf_id: str) -> List[Dict]:
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
         """Extract images from a learning PDF and generate captions (async).
         
         Args:
             pdf_path: Path to the PDF file
+<<<<<<< HEAD
+=======
+            user_id: ID of the user
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             pdf_id: ID of the PDF document
             
         Returns:
             List of dictionaries with image information
         """
         def _extract_images_sync():
+<<<<<<< HEAD
             return asyncio.run(self._extract_images_from_learning_pdf(pdf_path, pdf_id, subject))
+=======
+            return asyncio.run(self._extract_images_from_learning_pdf(pdf_path, user_id, pdf_id))
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
         
         # Run the synchronous operation in a thread pool
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.thread_pool, _extract_images_sync)
 
+<<<<<<< HEAD
     async def _extract_images_from_learning_pdf(self, pdf_path: str, pdf_id: str, subject: str) -> List[Dict]:
+=======
+    async def _extract_images_from_learning_pdf(self, pdf_path: str, user_id: str, pdf_id: str) -> List[Dict]:
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
         """Extract images from a learning PDF and generate captions using Gemini.
         
         Args:
             pdf_path: Path to the PDF file
+<<<<<<< HEAD
+=======
+            user_id: ID of the user
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             pdf_id: ID of the PDF document
             
         Returns:
@@ -1987,18 +2032,37 @@ class LearningService:
                 page = doc.load_page(page_num)
                 # Get the images on the page
                 image_list = page.get_images(full=True)
+<<<<<<< HEAD
                 image_id = str(uuid.uuid4())
                 image_filename = f"learning_image_{image_id}.png"
+=======
+
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                 for img in image_list:
                     xref = img[0]
                     base_image = doc.extract_image(xref)
                     image_bytes = base_image["image"]
+<<<<<<< HEAD
                     image_url = await self._save_learning_image_to_static_async(image_bytes, image_filename,subject)
+=======
+                    image_filename = os.path.join(images_folder, f"learning_image_{page_num + 1}_{image_count}.png")
+                    
+                    # Write the image to a file
+                    with open(image_filename, "wb") as img_file:
+                        img_file.write(image_bytes)
+                    
+                    # Generate a URL for the image (relative to static directory)
+                    image_url = f"/static/pdf_images/learning_{pdf_id}/learning_image_{page_num + 1}_{image_count}.png"
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                     
                     # Generate caption with Gemini API
                     try:
                         # Open the image with PIL
+<<<<<<< HEAD
                         pil_image = PIL.Image.open(image_url)
+=======
+                        pil_image = PIL.Image.open(image_filename)
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                         
                         # Generate educational caption
                         response = client.models.generate_content(
@@ -2184,7 +2248,11 @@ class LearningService:
             # Create subject-specific collection name for learning PDF images
             connection_string = settings.PGVECTOR_CONNECTION_STRING
             ug = PGEngine.from_connection_string(url=connection_string)
+<<<<<<< HEAD
             collection_name = f"learning_{subject}_images"
+=======
+            collection_name = f"learning_{subject}_images_{user_id}"
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             # Use the main PGVector connection
             
             
@@ -2232,10 +2300,18 @@ class LearningService:
             print(f"Error storing learning image captions in vector database: {str(e)}")
             return 0
 
+<<<<<<< HEAD
     async def _find_relevant_learning_images_async(self, subject: str, query: str, similarity_threshold: float = 0.4, max_images: int = 3) -> List[Dict]:
         """Find multiple relevant images from learning PDFs for a query (async).
         
         Args:
+=======
+    async def _find_relevant_learning_images_async(self, user_id: str, subject: str, query: str, similarity_threshold: float = 0.4, max_images: int = 3) -> List[Dict]:
+        """Find multiple relevant images from learning PDFs for a query (async).
+        
+        Args:
+            user_id: ID of the user
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             subject: Subject category
             query: Query to search for
             similarity_threshold: Maximum similarity score threshold (lower is more similar)
@@ -2245,16 +2321,28 @@ class LearningService:
             List of dictionaries with image information
         """
         def _find_images_sync():
+<<<<<<< HEAD
             return self._find_relevant_learning_images(subject, query, similarity_threshold, max_images)
+=======
+            return self._find_relevant_learning_images(user_id, subject, query, similarity_threshold, max_images)
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
         
         # Run the synchronous operation in a thread pool
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.thread_pool, _find_images_sync)
 
+<<<<<<< HEAD
     def _find_relevant_learning_images(self, subject: str, query: str, similarity_threshold: float = 0.4, max_images: int = 3) -> List[Dict]:
         """Find multiple relevant images from learning PDFs for a query.
         
         Args:
+=======
+    def _find_relevant_learning_images(self, user_id: str, subject: str, query: str, similarity_threshold: float = 0.4, max_images: int = 3) -> List[Dict]:
+        """Find multiple relevant images from learning PDFs for a query.
+        
+        Args:
+            user_id: ID of the user
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             subject: Subject category
             query: Query to search for
             similarity_threshold: Maximum similarity score threshold (lower is more similar)
@@ -2267,7 +2355,11 @@ class LearningService:
         
         try:
             # Create collection name for learning PDF images
+<<<<<<< HEAD
             collection_name = f"learning_{subject}_images"
+=======
+            collection_name = f"learning_{subject}_images_{user_id}"
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             connection_string = settings.PGVECTOR_CONNECTION_STRING
             ug = PGEngine.from_connection_string(url=connection_string)
             # Use the main PGVector connection
@@ -2318,6 +2410,10 @@ class LearningService:
 
     async def upload_learning_image(self,
                                     file: UploadFile,
+<<<<<<< HEAD
+=======
+                                    user_id: str,
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                                     caption: str,
                                     subject: str,
                                     topic: Optional[str] = None,
@@ -2327,6 +2423,10 @@ class LearningService:
         
         Args:
             file: Uploaded image file
+<<<<<<< HEAD
+=======
+            user_id: ID of the user
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             caption: Caption or description for the image
             subject: Subject category (must be one of the valid subjects)
             topic: Optional topic within the subject
@@ -2377,6 +2477,10 @@ class LearningService:
             # Process and save the image
             result = await self._process_learning_image_async(
                 image_id=image_id,
+<<<<<<< HEAD
+=======
+                user_id=user_id,
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                 caption=caption,
                 subject=subject,
                 topic=topic,
@@ -2399,6 +2503,10 @@ class LearningService:
 
     async def _process_learning_image_async(self,
                                             image_id: str,
+<<<<<<< HEAD
+=======
+                                            user_id: str,
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                                             caption: str,
                                             subject: str,
                                             topic: Optional[str],
@@ -2427,12 +2535,20 @@ class LearningService:
         try:
             # Save image to static directory
             image_url = await self._save_learning_image_to_static_async(
+<<<<<<< HEAD
                 file_contents, filename, subject
+=======
+                file_contents, filename, subject, user_id
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             )
             
             # Store image caption in vector database
             success = await self._store_single_learning_image_caption_async(
                 image_id=image_id,
+<<<<<<< HEAD
+=======
+                user_id=user_id,
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                 subject=subject,
                 caption=caption,
                 image_url=image_url,
@@ -2470,19 +2586,32 @@ class LearningService:
     async def _save_learning_image_to_static_async(self,
                                                    file_contents: bytes,
                                                    filename: str,
+<<<<<<< HEAD
                                                    subject: str) -> str:
+=======
+                                                   subject: str,
+                                                   user_id: str) -> str:
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
         """Save learning image to static directory (async).
         
         Args:
             file_contents: Raw image file content
             filename: Filename to save as
             subject: Subject category
+<<<<<<< HEAD
+=======
+            user_id: ID of the user
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             
         Returns:
             URL path to the saved image
         """
         def _save_image_sync():
+<<<<<<< HEAD
             return self._save_learning_image_to_static(file_contents, filename, subject)
+=======
+            return self._save_learning_image_to_static(file_contents, filename, subject, user_id)
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
         
         # Run the file operation in a thread pool
         loop = asyncio.get_event_loop()
@@ -2491,13 +2620,22 @@ class LearningService:
     def _save_learning_image_to_static(self,
                                        file_contents: bytes,
                                        filename: str,
+<<<<<<< HEAD
                                        subject: str) -> str:
+=======
+                                       subject: str,
+                                       user_id: str) -> str:
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
         """Save learning image to static directory.
         
         Args:
             file_contents: Raw image file content
             filename: Filename to save as
             subject: Subject category
+<<<<<<< HEAD
+=======
+            user_id: ID of the user
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             
         Returns:
             URL path to the saved image
@@ -2518,7 +2656,11 @@ class LearningService:
         
         # Create the learning images directory structure
         static_dir = os.path.join(server_dir, "static")
+<<<<<<< HEAD
         learning_images_dir = os.path.join(static_dir, "learning_images", subject)
+=======
+        learning_images_dir = os.path.join(static_dir, "learning_images", subject, user_id)
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
         
         # Ensure directory exists
         os.makedirs(learning_images_dir, exist_ok=True)
@@ -2529,6 +2671,7 @@ class LearningService:
             f.write(file_contents)
         
         # Return URL path (relative to static directory)
+<<<<<<< HEAD
         url_path = f"/static/learning_images/{subject}/{filename}"
         print(f"Saved learning image to: {file_path}")
         print(f"Generated URL: {url_path}")
@@ -2537,6 +2680,17 @@ class LearningService:
 
     async def _store_single_learning_image_caption_async(self,
                                                          image_id: str,
+=======
+        url_path = f"/static/learning_images/{subject}/{user_id}/{filename}"
+        print(f"Saved learning image to: {file_path}")
+        print(f"Generated URL: {url_path}")
+        
+        return url_path
+
+    async def _store_single_learning_image_caption_async(self,
+                                                         image_id: str,
+                                                         user_id: str,
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                                                          subject: str,
                                                          caption: str,
                                                          image_url: str,
@@ -2548,6 +2702,10 @@ class LearningService:
         
         Args:
             image_id: Unique identifier for the image
+<<<<<<< HEAD
+=======
+            user_id: ID of the user
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             subject: Subject category
             caption: Image caption
             image_url: URL path to the image
@@ -2561,7 +2719,11 @@ class LearningService:
         """
         def _store_caption_sync():
             return asyncio.run(self._store_single_learning_image_caption(
+<<<<<<< HEAD
                 image_id, subject, caption, image_url, topic, grade, page_number, original_filename
+=======
+                image_id, user_id, subject, caption, image_url, topic, grade, page_number, original_filename
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             ))
         
         # Run the synchronous operation in a thread pool
@@ -2570,6 +2732,10 @@ class LearningService:
 
     async def _store_single_learning_image_caption(self,
                                                    image_id: str,
+<<<<<<< HEAD
+=======
+                                                   user_id: str,
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                                                    subject: str,
                                                    caption: str,
                                                    image_url: str,
@@ -2581,6 +2747,10 @@ class LearningService:
         
         Args:
             image_id: Unique identifier for the image
+<<<<<<< HEAD
+=======
+            user_id: ID of the user
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             subject: Subject category
             caption: Image caption
             image_url: URL path to the image
@@ -2594,7 +2764,11 @@ class LearningService:
         """
         try:
             # Create subject-specific collection name for learning images
+<<<<<<< HEAD
             collection_name = f"learning_{subject}_images"
+=======
+            collection_name = f"learning_{subject}_images_{user_id}"
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
             connection_string = settings.PGVECTOR_CONNECTION_STRING
             ug = PGEngine.from_connection_string(url=connection_string)
             
@@ -2616,6 +2790,10 @@ class LearningService:
                 page_content=caption,
                 metadata={
                     'image_id': image_id,
+<<<<<<< HEAD
+=======
+                    'user_id': user_id,
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                     'subject': subject,
                     'topic': topic or '',
                     'grade': grade or '',

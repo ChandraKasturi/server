@@ -222,7 +222,11 @@ class PDFProcessingService:
         
         while True:
             try:
+<<<<<<< HEAD
                 print(f"Redis Client: {self.redis_client}")
+=======
+                #print(f"Redis Client: {self.redis_client}")
+>>>>>>> bb7e33e26badd40ed17483225843777de2122d6d
                 # Get the highest priority task from Redis sorted set
                 tasks = await self.redis_client.zpopmax("pdf_processing_queue", 1)
                 

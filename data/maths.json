@@ -1,0 +1,502 @@
+{
+  "class": "X",
+  "subject": "Mathematics",
+  "session": "2025-26",
+  "source": "CBSE Mathematics (041/241) Classes IX-X (2025-26) PDF",
+  "allowed_topics": [
+    {
+      "unit_id": "I",
+      "unit_name": "Number Systems",
+      "topic_id": "I.1",
+      "topic_name": "Real Numbers",
+      "subtopics": [
+        {
+          "subtopic_id": "I.1.1",
+          "name": "Fundamental Theorem of Arithmetic (statements, examples, applications)",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "statement and meaning",
+              "prime factorisation usage",
+              "HCF/LCM based on prime factorisation",
+              "NCERT-style word problems"
+            ],
+            "excludes": [
+              "content beyond CBSE Class 10 scope"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "I.1.2",
+          "name": "Proofs of irrationality: √2, √3, √5 (and similar forms as listed)",
+          "depth": {
+            "level": "proof_required",
+            "includes": [
+              "standard contradiction proof format",
+              "algebraic proof steps used in CBSE",
+              "examples like √2, √3, √5 and forms indicated"
+            ],
+            "excludes": [
+              "advanced number theory proofs"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "II",
+      "unit_name": "Algebra",
+      "topic_id": "II.1",
+      "topic_name": "Polynomials",
+      "subtopics": [
+        {
+          "subtopic_id": "II.1.1",
+          "name": "Zeros of a polynomial",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "identify zeros from factorised form",
+              "verify zeros by substitution",
+              "graphical intuition (as per CBSE use)"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "II.1.2",
+          "name": "Relationship between zeros and coefficients (quadratic polynomials)",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "α+β = -b/a and αβ = c/a for ax²+bx+c",
+              "forming quadratic polynomial from given zeros",
+              "CBSE-style problems"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "II",
+      "unit_name": "Algebra",
+      "topic_id": "II.2",
+      "topic_name": "Pair of Linear Equations in Two Variables",
+      "subtopics": [
+        {
+          "subtopic_id": "II.2.1",
+          "name": "Graphical method; consistency/inconsistency",
+          "depth": {
+            "level": "conceptual_plus_application",
+            "includes": [
+              "intersection/parallel/coincident lines meaning",
+              "reading solutions from graphs",
+              "link to number of solutions"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "II.2.2",
+          "name": "Algebraic conditions for number of solutions",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "a1/a2, b1/b2, c1/c2 cases",
+              "identify unique/no/infinitely many solutions"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "II.2.3",
+          "name": "Algebraic solution: substitution and elimination; situational problems",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "solve using substitution",
+              "solve using elimination",
+              "convert word problems into equations"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "II",
+      "unit_name": "Algebra",
+      "topic_id": "II.3",
+      "topic_name": "Quadratic Equations",
+      "subtopics": [
+        {
+          "subtopic_id": "II.3.1",
+          "name": "Standard form ax²+bx+c=0 (a≠0); identifying coefficients",
+          "depth": {
+            "level": "conceptual"
+          }
+        },
+        {
+          "subtopic_id": "II.3.2",
+          "name": "Solutions (real roots only) by factorisation and quadratic formula",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "solve by factorisation",
+              "solve using quadratic formula",
+              "choose method appropriately"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "II.3.3",
+          "name": "Discriminant and nature of roots",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "D=b²−4ac",
+              "D>0, D=0, D<0 interpretation (real roots focus)"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "II.3.4",
+          "name": "Situational problems based on quadratic equations (day-to-day contexts)",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "form quadratic equation from statement",
+              "solve and interpret solution"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "II",
+      "unit_name": "Algebra",
+      "topic_id": "II.4",
+      "topic_name": "Arithmetic Progressions (AP)",
+      "subtopics": [
+        {
+          "subtopic_id": "II.4.1",
+          "name": "Concept/motivation for AP",
+          "depth": { "level": "conceptual" }
+        },
+        {
+          "subtopic_id": "II.4.2",
+          "name": "nth term and sum of first n terms; applications",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "an = a + (n−1)d",
+              "Sn = n/2 [2a + (n−1)d]",
+              "word problems"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "III",
+      "unit_name": "Coordinate Geometry",
+      "topic_id": "III.1",
+      "topic_name": "Coordinate Geometry (Distance & Section Formula)",
+      "subtopics": [
+        {
+          "subtopic_id": "III.1.1",
+          "name": "Review of coordinate geometry; distance formula",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "distance between two points",
+              "problems based on distance"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "III.1.2",
+          "name": "Section formula (internal division)",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "coordinates of point dividing line segment in ratio m:n",
+              "CBSE-style numericals"
+            ],
+            "excludes": [
+              "external division (unless explicitly added in your content)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "IV",
+      "unit_name": "Geometry",
+      "topic_id": "IV.1",
+      "topic_name": "Triangles (Similarity)",
+      "subtopics": [
+        {
+          "subtopic_id": "IV.1.1",
+          "name": "Similar triangles: definitions, examples, counterexamples",
+          "depth": { "level": "conceptual_plus_application" }
+        },
+        {
+          "subtopic_id": "IV.1.2",
+          "name": "Basic Proportionality Theorem (BPT) and converse (as listed)",
+          "depth": {
+            "level": "proof_required",
+            "includes": [
+              "prove BPT",
+              "use BPT and converse in problems"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "IV.1.3",
+          "name": "Similarity criteria (AA/AAA style statements; proportional sides, equal angles etc.)",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "apply similarity criteria to prove triangles similar",
+              "use similarity to find lengths/ratios/areas (as per CBSE questions)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "IV",
+      "unit_name": "Geometry",
+      "topic_id": "IV.2",
+      "topic_name": "Circles (Tangents)",
+      "subtopics": [
+        {
+          "subtopic_id": "IV.2.1",
+          "name": "Tangent at a point is perpendicular to radius through point of contact",
+          "depth": {
+            "level": "proof_required",
+            "includes": [
+              "prove the theorem",
+              "apply in problems"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "IV.2.2",
+          "name": "Lengths of tangents from an external point are equal",
+          "depth": {
+            "level": "proof_required",
+            "includes": [
+              "prove the theorem",
+              "apply in numericals"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "V",
+      "unit_name": "Trigonometry",
+      "topic_id": "V.1",
+      "topic_name": "Introduction to Trigonometry",
+      "subtopics": [
+        {
+          "subtopic_id": "V.1.1",
+          "name": "Trigonometric ratios of an acute angle in a right triangle; existence (well-defined)",
+          "depth": {
+            "level": "conceptual_plus_application",
+            "includes": [
+              "sin, cos, tan definitions",
+              "apply ratios to solve triangle problems"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "V.1.2",
+          "name": "Values of ratios for 30°, 45°, 60°; ratios at 0° and 90° (as motivated)",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "standard values table",
+              "simplifying expressions using standard values"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "V.1.3",
+          "name": "Relationships between trigonometric ratios",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "basic relationships like tan = sin/cos (as per CBSE level)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "V",
+      "unit_name": "Trigonometry",
+      "topic_id": "V.2",
+      "topic_name": "Trigonometric Identities",
+      "subtopics": [
+        {
+          "subtopic_id": "V.2.1",
+          "name": "Proof and applications of sin²A + cos²A = 1",
+          "depth": {
+            "level": "proof_required",
+            "includes": [
+              "prove identity",
+              "use identity to solve expressions"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "V.2.2",
+          "name": "Only simple identities (as specified)",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "simple manipulation-based identity questions"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "V",
+      "unit_name": "Trigonometry",
+      "topic_id": "V.3",
+      "topic_name": "Heights and Distances",
+      "subtopics": [
+        {
+          "subtopic_id": "V.3.1",
+          "name": "Angle of elevation and depression; simple problems",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "max two right triangles",
+              "angles restricted to 30°, 45°, 60°",
+              "real-life word problems"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "VI",
+      "unit_name": "Mensuration",
+      "topic_id": "VI.1",
+      "topic_name": "Areas Related to Circles",
+      "subtopics": [
+        {
+          "subtopic_id": "VI.1.1",
+          "name": "Area of sectors and segments of a circle",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "sector area",
+              "segment area (using sector minus triangle, as per NCERT pattern)"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "VI.1.2",
+          "name": "Problems on area/perimeter/circumference; segment angle restriction 60°, 90°, 120°",
+          "depth": {
+            "level": "application_with_constraints",
+            "includes": [
+              "compute area/perimeter/circumference",
+              "segment problems only for 60°, 90°, 120°"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "VI",
+      "unit_name": "Mensuration",
+      "topic_id": "VI.2",
+      "topic_name": "Surface Areas and Volumes",
+      "subtopics": [
+        {
+          "subtopic_id": "VI.2.1",
+          "name": "Surface areas & volumes of combinations of any two solids (from the given list)",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "cubes/cuboids/spheres/hemispheres/cylinders/cones (combinations of any two)",
+              "mensuration word problems"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "VII",
+      "unit_name": "Statistics and Probability",
+      "topic_id": "VII.1",
+      "topic_name": "Statistics (Grouped Data)",
+      "subtopics": [
+        {
+          "subtopic_id": "VII.1.1",
+          "name": "Mean of grouped data (direct, assumed mean, step-deviation)",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "compute mean with all 3 methods",
+              "table-based questions"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "VII.1.2",
+          "name": "Median and mode of grouped data (algebraic method); avoid bimodal",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "median formula-based problems",
+              "mode formula-based problems"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "VII",
+      "unit_name": "Statistics and Probability",
+      "topic_id": "VII.2",
+      "topic_name": "Probability",
+      "subtopics": [
+        {
+          "subtopic_id": "VII.2.1",
+          "name": "Classical definition of probability",
+          "depth": {
+            "level": "conceptual_plus_application",
+            "includes": [
+              "P(E) = favourable/total (equally likely outcomes)",
+              "identify sample space in simple contexts"
+            ]
+          }
+        },
+        {
+          "subtopic_id": "VII.2.2",
+          "name": "Simple problems on probability of an event",
+          "depth": {
+            "level": "application",
+            "includes": [
+              "coins/dice/cards (simple CBSE level)",
+              "basic event probability"
+            ],
+            "excludes": [
+              "conditional probability",
+              "Bayes theorem",
+              "random variables",
+              "distribution problems"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "refusal_policy": {
+    "rule": "If the question cannot be mapped to allowed_topics.subtopics, refuse as out-of-syllabus for CBSE Class 10 Math (2025-26).",
+    "refusal_message": "I can help only with CBSE Class 10 Mathematics topics from the 2025–26 syllabus. Please ask a question from one of the listed chapters/topics."
+  }
+}
