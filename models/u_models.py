@@ -795,3 +795,94 @@ class AchievementSummaryResponse(BaseModel):
     """Response model for achievement summary"""
     summary: AchievementSummary
     quick_stats: Dict[str, Any]
+
+# QUESTION GENERATION MODELS (for OpenAI Structured Outputs)
+
+class MCQQuestion(BaseModel):
+    """Model for a single MCQ question"""
+    question: str
+    option1: str
+    option2: str
+    option3: str
+    option4: str
+    correctanswer: str
+    explaination: str
+    question_type: str
+
+class MCQQuestionsResponse(BaseModel):
+    """Response model for multiple MCQ questions"""
+    questions: List[MCQQuestion]
+
+class VeryShortAnswerQuestion(BaseModel):
+    """Model for a single very short answer question"""
+    question: str
+    model_answer: str
+    grading_criteria: str
+    question_type: str
+    explaination: str
+    expected_length: str
+
+class VeryShortAnswerQuestionsResponse(BaseModel):
+    """Response model for multiple very short answer questions"""
+    questions: List[VeryShortAnswerQuestion]
+
+class ShortAnswerQuestion(BaseModel):
+    """Model for a single short answer question"""
+    question: str
+    model_answer: str
+    grading_criteria: str
+    question_type: str
+    explaination: str
+    expected_length: str
+
+class ShortAnswerQuestionsResponse(BaseModel):
+    """Response model for multiple short answer questions"""
+    questions: List[ShortAnswerQuestion]
+
+class LongAnswerQuestion(BaseModel):
+    """Model for a single long answer question"""
+    question: str
+    model_answer: str
+    grading_criteria: str
+    question_type: str
+    explaination: str
+    expected_length: str
+
+class LongAnswerQuestionsResponse(BaseModel):
+    """Response model for multiple long answer questions"""
+    questions: List[LongAnswerQuestion]
+
+class CaseStudyQuestion(BaseModel):
+    """Model for a single case study question"""
+    question: str
+    model_answer: str
+    grading_criteria: str
+    question_type: str
+    explaination: str
+    scenario_type: str
+
+class CaseStudyQuestionsResponse(BaseModel):
+    """Response model for multiple case study questions"""
+    questions: List[CaseStudyQuestion]
+
+class FillBlanksQuestion(BaseModel):
+    """Model for a single fill in the blanks question"""
+    question: str
+    answers: List[str]
+    explaination: str
+    question_type: str
+
+class FillBlanksQuestionsResponse(BaseModel):
+    """Response model for multiple fill in the blanks questions"""
+    questions: List[FillBlanksQuestion]
+
+class TrueFalseQuestion(BaseModel):
+    """Model for a single true/false question"""
+    question: str
+    correctanswer: str
+    explaination: str
+    question_type: str
+
+class TrueFalseQuestionsResponse(BaseModel):
+    """Response model for multiple true/false questions"""
+    questions: List[TrueFalseQuestion]

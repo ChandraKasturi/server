@@ -8,6 +8,8 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
+from openai import OpenAI
+from sqlalchemy import create_engine, text
 
 from config import settings
 from repositories.mongo_repository import HistoryRepository, QuestionRepository, generate_assessment_title
@@ -15,6 +17,11 @@ from repositories.postgres_text_repository import PostgresTextRepository
 from repositories.pdf_repository import PDFRepository
 from services.langchain.langchain_service import LangchainService
 from models.pdf_models import ProcessingStatus, QuestionType
+from models.u_models import (
+    MCQQuestionsResponse, VeryShortAnswerQuestionsResponse, ShortAnswerQuestionsResponse,
+    LongAnswerQuestionsResponse, CaseStudyQuestionsResponse, FillBlanksQuestionsResponse,
+    TrueFalseQuestionsResponse
+)
 from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_postgres import PGVectorStore
@@ -32,6 +39,7 @@ class AssessmentService:
         self.postgres_text_repository = PostgresTextRepository()
         self.llm = ChatOpenAI(api_key=settings.OPENAI_API_KEY)
         self.ug_llm = ChatOpenAI(api_key=settings.OPENAI_API_KEY, model="gpt-4o")
+        self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
         '''self.llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")
         self.ug_llm = ChatGoogleGenerativeAI(google_api_key=settings.GOOGLE_API_KEY, model="gemini-2.0-flash")'''
     
@@ -337,9 +345,51 @@ class AssessmentService:
                     
         return all_questions
     
+    def _get_topic_content_from_postgres(self, subject: str, topic: str) -> str:
+        """Retrieve content from PostgreSQL where metadata title matches the topic.
+        
+        Args:
+            subject: Subject name (e.g., "science", "mathematics")
+            topic: Topic name to search for in metadata title
+            
+        Returns:
+            Concatenated content from matching documents
+        """
+        try:
+            # Format subject for table name (e.g., "cbse_science")
+            table_name = f"{subject.lower()}"
+            
+            # Create database connection
+            engine = create_engine(settings.POSTGRES_CONNECTION_STRING)
+            
+            # Query to get content where metadata->>'title' matches the topic
+            query = text(f"""
+                SELECT content, langchain_metadata 
+                FROM {table_name}
+                WHERE langchain_metadata->>'title' = :topic
+                ORDER BY (langchain_metadata->>'chunk_index')::int
+            """)
+            
+            with engine.connect() as connection:
+                result = connection.execute(query, {"topic": topic})
+                rows = result.fetchall()
+                
+                if not rows:
+                    print(f"No content found in {table_name} for topic: {topic}")
+                    return ""
+                
+                # Concatenate all document content
+                content = "\n\n".join([row[0] for row in rows if row[0]])
+                print(f"Retrieved {len(rows)} chunks for topic '{topic}' from {table_name}")
+                return content
+                
+        except Exception as e:
+            print(f"Error retrieving content from PostgreSQL: {str(e)}")
+            return ""
+    
     def _generate_questions_of_type(self, subject: str, topic: str, subtopic: str, 
                                    level: int, num_questions: int, question_type: str) -> List[Dict]:
-        """Generate questions of a specific type.
+        """Generate questions of a specific type using OpenAI structured outputs.
         
         Args:
             subject: Subject of the questions
@@ -352,298 +402,187 @@ class AssessmentService:
         Returns:
             List of generated questions
         """
-        # Create prompt based on question type
+        # Get content from PostgreSQL for the topic
+        topic_content = self._get_topic_content_from_postgres(subject, topic)
+        
+        # Build context for question generation
+        content_context = ""
+        if topic_content:
+            content_context = f"\n\nRelevant Content:\n{topic_content[:8000]}"  # Limit content size
+        
+        # Create system and user prompts based on question type
+        system_prompt = "You are an expert educator creating high-quality assessment questions."
+        
         if question_type == "MCQ":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} multiple-choice questions about {subject}, specifically on the 
-            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 3 is hardest).
-            You must generate exactly {num_questions} questions.
+            user_prompt = f"""Generate {num_questions} multiple-choice questions about {subject}, specifically on the topic of {topic} and subtopic {subtopic}. 
+Make these questions suitable for difficulty level {level} (where 1 is easiest and 5 is hardest).
+You must generate exactly {num_questions} questions.
+
+For each question:
+1. Create a challenging but fair question
+2. Provide four options
+3. Indicate the correct answer (option1, option2, option3, or option4)
+4. Include a brief explanation of why the answer is correct
+5. Set question_type to "MCQ"
+
+Make sure the questions test understanding of key concepts, not just trivial details.{content_context}"""
+            response_model = MCQQuestionsResponse
             
-            For each question:
-            1. Create a challenging but fair question
-            2. Provide four options (A, B, C, D)
-            3. Indicate the correct answer
-            4. Include a brief explanation of why the answer is correct
-            
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The question text",
-                "option1": "Option A",
-                "option2": "Option B",
-                "option3": "Option C",
-                "option4": "Option D",
-                "correctanswer": "option1, option2, option3, or option4",
-                "explaination": "Explanation of the correct answer",
-                "question_type": "MCQ"
-              }},
-              // more questions...
-            ]
-            
-            Make sure the questions test understanding of key concepts, not just trivial details.
-            """
         elif question_type == "VERY_SHORT_ANSWER":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} very short answer questions about {subject}, specifically on the 
-            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 3 is hardest).
-            You must generate exactly {num_questions} questions.
-            For each question:
-            1. Create questions that require very brief answers (1-3 words, definitions, terms)
-            2. Focus on key terminology, concepts, or factual recall
-            3. Provide a model answer that demonstrates the expected brevity
-            4. Include grading criteria specific to very short answers
+            user_prompt = f"""Generate {num_questions} very short answer questions about {subject}, specifically on the topic of {topic} and subtopic {subtopic}.
+Make these questions suitable for difficulty level {level} (where 1 is easiest and 5 is hardest).
+You must generate exactly {num_questions} questions.
+
+For each question:
+1. Create questions that require very brief answers (1-3 words, definitions, terms)
+2. Focus on key terminology, concepts, or factual recall
+3. Provide a model answer that demonstrates the expected brevity
+4. Include grading criteria specific to very short answers
+5. Set question_type to "VERY_SHORT_ANSWER"
+6. Set expected_length to "1-3 words"
+
+Focus on essential terminology and key concepts that can be answered concisely.{content_context}"""
+            response_model = VeryShortAnswerQuestionsResponse
             
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The question text (e.g., 'What is...?', 'Define...', 'Name the...')",
-                "model_answer": "Expected very short answer (1-3 words)",
-                "grading_criteria": "Full marks for exact/equivalent term, partial marks for close answers, zero for incorrect",
-                "question_type": "VERY_SHORT_ANSWER",
-                "explaination": "Brief explanation about the expected answer",
-                "expected_length": "1-3 words"
-              }},
-              // more questions...
-            ]
-            
-            Focus on essential terminology and key concepts that can be answered concisely.
-            """
         elif question_type == "SHORT_ANSWER":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} short answer questions about {subject}, specifically on the 
-            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 3 is hardest).
-            You must generate exactly {num_questions} questions.
-            For each question:
-            1. Create questions that require brief explanations (1-3 sentences)
-            2. Focus on understanding, brief reasoning, or concise explanations
-            3. Provide a model answer that demonstrates the expected length
-            4. Include specific grading criteria for short answers
+            user_prompt = f"""Generate {num_questions} short answer questions about {subject}, specifically on the topic of {topic} and subtopic {subtopic}.
+Make these questions suitable for difficulty level {level} (where 1 is easiest and 5 is hardest).
+You must generate exactly {num_questions} questions.
+
+For each question:
+1. Create questions that require brief explanations (1-3 sentences)
+2. Focus on understanding, brief reasoning, or concise explanations
+3. Provide a model answer that demonstrates the expected length
+4. Include specific grading criteria for short answers
+5. Set question_type to "SHORT_ANSWER"
+6. Set expected_length to "1-3 sentences"
+
+Ensure questions test understanding while requiring concise responses.{content_context}"""
+            response_model = ShortAnswerQuestionsResponse
             
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The question text",
-                "model_answer": "Brief but complete answer (1-3 sentences)",
-                "grading_criteria": "Key points breakdown: main concept (X marks), supporting detail (Y marks), clarity (Z marks)",
-                "question_type": "SHORT_ANSWER",
-                "explaination": "Brief explanation about the question and key concepts tested",
-                "expected_length": "1-3 sentences"
-              }},
-              // more questions...
-            ]
-            
-            Ensure questions test understanding while requiring concise responses.
-            """
         elif question_type == "LONG_ANSWER":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} long answer questions about {subject}, specifically on the 
-            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 3 is hardest).
-            You must generate exactly {num_questions} questions.
-            For each question:
-            1. Create questions that require detailed explanations and analysis (multiple paragraphs)
-            2. Focus on deep understanding, critical thinking, and comprehensive responses
-            3. Provide a detailed model answer showing expected depth
-            4. Include comprehensive grading criteria with multiple assessment points
+            user_prompt = f"""Generate {num_questions} long answer questions about {subject}, specifically on the topic of {topic} and subtopic {subtopic}.
+Make these questions suitable for difficulty level {level} (where 1 is easiest and 5 is hardest).
+You must generate exactly {num_questions} questions.
+
+For each question:
+1. Create questions that require detailed explanations and analysis (multiple paragraphs)
+2. Focus on deep understanding, critical thinking, and comprehensive responses
+3. Provide a detailed model answer showing expected depth
+4. Include comprehensive grading criteria with multiple assessment points
+5. Set question_type to "LONG_ANSWER"
+6. Set expected_length to "Multiple paragraphs"
+
+Focus on higher-order thinking skills and comprehensive understanding.{content_context}"""
+            response_model = LongAnswerQuestionsResponse
             
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The question text",
-                "model_answer": "Comprehensive detailed answer with multiple key points and examples",
-                "grading_criteria": "Detailed breakdown: concept understanding (X marks), examples/evidence (Y marks), analysis/evaluation (Z marks), structure/clarity (W marks)",
-                "question_type": "LONG_ANSWER",
-                "explaination": "Explanation of the depth and scope expected in the answer",
-                "expected_length": "Multiple paragraphs"
-              }},
-              // more questions...
-            ]
-            
-            Focus on higher-order thinking skills and comprehensive understanding.
-            """
         elif question_type == "CASE_STUDY":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} case study questions about {subject}, specifically on the 
-            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 3 is hardest).
-            You must generate exactly {num_questions} questions.
-            For each question:
-            1. Create realistic scenarios that require application of knowledge
-            2. Present a situation/problem that needs analysis and solution
-            3. Require students to apply theoretical concepts to practical situations
-            4. Include comprehensive grading criteria for case analysis
+            user_prompt = f"""Generate {num_questions} case study questions about {subject}, specifically on the topic of {topic} and subtopic {subtopic}.
+Make these questions suitable for difficulty level {level} (where 1 is easiest and 5 is hardest).
+You must generate exactly {num_questions} questions.
+
+For each question:
+1. Create realistic scenarios that require application of knowledge
+2. Present a situation/problem that needs analysis and solution
+3. Require students to apply theoretical concepts to practical situations
+4. Include comprehensive grading criteria for case analysis
+5. Set question_type to "CASE_STUDY"
+6. Set scenario_type to "Application-based problem solving"
+
+Ensure scenarios are realistic and require practical application of theoretical knowledge.{content_context}"""
+            response_model = CaseStudyQuestionsResponse
             
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "Present a realistic scenario/case followed by specific questions about analysis, solutions, or applications",
-                "model_answer": "Comprehensive case analysis with problem identification, theoretical application, and practical solutions",
-                "grading_criteria": "Case analysis (X marks), theoretical application (Y marks), practical solutions (Z marks), justification (W marks)",
-                "question_type": "CASE_STUDY",
-                "explaination": "Overview of the case scenario and key learning objectives",
-                "scenario_type": "Application-based problem solving"
-              }},
-              // more questions...
-            ]
-            
-            Ensure scenarios are realistic and require practical application of theoretical knowledge.
-            """
         elif question_type == "FILL_BLANKS":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} fill-in-the-blank questions about {subject}, specifically on the 
-            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 3 is hardest).
-            You must generate exactly {num_questions} questions.
-            For each question:
-            1. Create a sentence or paragraph with key terms removed and replaced with blanks
-            2. Provide the correct answers for each blank
-            3. Include a brief explanation for why these answers are correct
+            user_prompt = f"""Generate {num_questions} fill-in-the-blank questions about {subject}, specifically on the topic of {topic} and subtopic {subtopic}.
+Make these questions suitable for difficulty level {level} (where 1 is easiest and 5 is hardest).
+You must generate exactly {num_questions} questions.
+
+For each question:
+1. Create a sentence or paragraph with key terms removed and replaced with blanks (indicated by _____)
+2. Provide the correct answers for each blank as a list
+3. Include a brief explanation for why these answers are correct
+4. Set question_type to "FILL_BLANKS"
+
+Make sure the blanks focus on important terminology or concepts.{content_context}"""
+            response_model = FillBlanksQuestionsResponse
             
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The sentence with blanks indicated by _____",
-                "answers": ["Answer for blank 1", "Answer for blank 2", ...],
-                "explaination": "Explanation of the correct answers",
-                "question_type": "FILL_BLANKS"
-              }},
-              // more questions...
-            ]
-            
-            Make sure the blanks focus on important terminology or concepts.
-            """
         elif question_type == "TRUEFALSE":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} true/false questions about {subject}, specifically on the 
-            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 3 is hardest).
-            You must generate exactly {num_questions} questions.
-            For each question:
-            1. Create a challenging but clear statement that is either true or false
-            2. Indicate whether the statement is true or false
-            3. Include a brief explanation of why the statement is true or false
+            user_prompt = f"""Generate {num_questions} true/false questions about {subject}, specifically on the topic of {topic} and subtopic {subtopic}.
+Make these questions suitable for difficulty level {level} (where 1 is easiest and 5 is hardest).
+You must generate exactly {num_questions} questions.
+
+For each question:
+1. Create a challenging but clear statement that is either true or false
+2. Indicate whether the statement is true or false (lowercase: "true" or "false")
+3. Include a brief explanation of why the statement is true or false
+4. Set question_type to "TRUEFALSE"
+
+Make sure the questions test understanding of key concepts, not just trivial details.{content_context}"""
+            response_model = TrueFalseQuestionsResponse
             
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The statement to evaluate as true or false",
-                "correctanswer": "true or false (lowercase)",
-                "explaination": "Explanation of why the statement is true or false",
-                "question_type": "TRUEFALSE"
-              }},
-              // more questions...
-            ]
-            
-            Make sure the questions test understanding of key concepts, not just trivial details.
-            """
         else:
             # Default to MCQ if the type is not recognized
             question_type = "MCQ"
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} multiple-choice questions about {subject}, specifically on the 
-            topic of {topic} and subtopic {subtopic}. Make these questions suitable for difficulty 
-            level {level} (where 1 is easiest and 3 is hardest).
-            You must generate exactly {num_questions} questions.
-            For each question:
-            1. Create a challenging but fair question
-            2. Provide four options (A, B, C, D)
-            3. Indicate the correct answer
-            4. Include a brief explanation of why the answer is correct
-            
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The question text",
-                "option1": "Option A",
-                "option2": "Option B",
-                "option3": "Option C",
-                "option4": "Option D",
-                "correctanswer": "option1, option2, option3, or option4",
-                "explaination": "Explanation of the correct answer",
-                "question_type": "MCQ"
-              }},
-              // more questions...
-            ]
-            
-            Make sure the questions test understanding of key concepts, not just trivial details.
-            """
+            user_prompt = f"""Generate {num_questions} multiple-choice questions about {subject}, specifically on the topic of {topic} and subtopic {subtopic}.
+Make these questions suitable for difficulty level {level} (where 1 is easiest and 5 is hardest).
+You must generate exactly {num_questions} questions.
+
+For each question:
+1. Create a challenging but fair question
+2. Provide four options
+3. Indicate the correct answer (option1, option2, option3, or option4)
+4. Include a brief explanation of why the answer is correct
+5. Set question_type to "MCQ"
+
+Make sure the questions test understanding of key concepts, not just trivial details.{content_context}"""
+            response_model = MCQQuestionsResponse
         
-        generate_prompt = PromptTemplate.from_template(prompt_template)
-        generate_chain = generate_prompt | self.ug_llm | StrOutputParser()
-        
-        questions_json = generate_chain.invoke({
-            "num_questions": num_questions,
-            "subject": subject,
-            "topic": topic,
-            "subtopic": subtopic,
-            "level": level
-        })
-        
+        # Call OpenAI API with structured outputs
         try:
-            # Parse generated questions
-            questions = json.loads(questions_json.replace("```json", "").replace("```", ""))
+            completion = self.openai_client.beta.chat.completions.parse(
+                model="gpt-4o-2024-08-06",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format=response_model
+            )
             
-            # Ensure proper structure and add metadata
+            # Extract parsed questions
+            parsed_response = completion.choices[0].message.parsed
+            questions = [q.model_dump() for q in parsed_response.questions]
+            
+            # Add metadata and process questions
             for q in questions:
                 q["subject"] = subject
                 q["topic"] = topic
                 q["subtopic"] = subtopic
                 q["level"] = str(level)
                 q["questionset"] = "generated"
-                q["marks"] = "1"  # Default mark
                 q["created_at"] = datetime.utcnow().isoformat()
                 
-                # Set required fields based on question type
+                # Set marks based on question type
                 q_type = q.get("question_type", question_type).upper()
                 
                 if q_type == "MCQ":
-                    required_fields = ["question", "option1", "option2", "option3", "option4", 
-                                      "correctanswer", "explaination"]
-                    for field in required_fields:
-                        if field not in q:
-                            q[field] = ""
-                
-                elif q_type in ["VERY_SHORT_ANSWER", "SHORT_ANSWER", "LONG_ANSWER", "CASE_STUDY"]:
-                    required_fields = ["question", "model_answer", "grading_criteria", "explaination"]
-                    for field in required_fields:
-                        if field not in q:
-                            q[field] = ""
-                    # Set specific marks based on answer type
-                    if q_type == "VERY_SHORT_ANSWER":
-                        q["marks"] = "1"
-                    elif q_type == "SHORT_ANSWER":
-                        q["marks"] = "3"
-                    elif q_type == "LONG_ANSWER":
-                        q["marks"] = "5"
-                    elif q_type == "CASE_STUDY":
-                        q["marks"] = "10"
-                
+                    q["marks"] = "1"
+                elif q_type == "VERY_SHORT_ANSWER":
+                    q["marks"] = "1"
+                elif q_type == "SHORT_ANSWER":
+                    q["marks"] = "3"
+                elif q_type == "LONG_ANSWER":
+                    q["marks"] = "5"
+                elif q_type == "CASE_STUDY":
+                    q["marks"] = "10"
                 elif q_type == "FILL_BLANKS":
-                    if "question" not in q:
-                        q["question"] = ""
-                    if "explaination" not in q:
-                        q["explaination"] = ""
-                    if "answers" not in q:
-                        q["answers"] = []
-                
+                    q["marks"] = "1"
                 elif q_type == "TRUEFALSE":
-                    if "question" not in q:
-                        q["question"] = ""
-                    if "correctanswer" not in q:
-                        q["correctanswer"] = "true"
-                    if "explaination" not in q:
-                        q["explaination"] = ""
-                    
+                    q["marks"] = "1"
                     # Ensure the correct_answer is lowercase (true or false)
                     if isinstance(q.get("correctanswer"), str):
                         q["correctanswer"] = q["correctanswer"].lower()
-                
-                # Ensure question_type is included
-                if "question_type" not in q:
-                    q["question_type"] = question_type
+                else:
+                    q["marks"] = "1"
                 
                 # Insert question into question bank
                 try:
@@ -664,52 +603,9 @@ class AssessmentService:
                     print(f"Error inserting question into question bank: {str(e)}")
             
             return questions
-        except (json.JSONDecodeError, TypeError) as e:
-            print(f"Error parsing generated questions: {str(e)}")
-            # If JSON parsing fails, try to extract JSON using basic pattern matching
-            try:
-                # Find JSON array in the text
-                start_idx = questions_json.find('[')
-                end_idx = questions_json.rfind(']') + 1
-                if start_idx >= 0 and end_idx > start_idx:
-                    extracted_json = questions_json[start_idx:end_idx]
-                    questions = json.loads(extracted_json)
-                    
-                    # Process questions as above
-                    for q in questions:
-                        q["subject"] = subject
-                        q["topic"] = topic
-                        q["subtopic"] = subtopic
-                        q["level"] = str(level)
-                        q["questionset"] = "generated"
-                        q["marks"] = "1"  # Default mark
-                        q["created_at"] = datetime.utcnow().isoformat()
-                        
-                        # Ensure question_type is included
-                        if "question_type" not in q:
-                            q["question_type"] = question_type
-                            
-                        # Insert question into question bank
-                        try:
-                            # Create a copy of the question for insertion to avoid modifying the original
-                            question_copy = q.copy()
-                            
-                            # Insert into question bank
-                            success = self.question_repo.insert_question(question_copy)
-                            
-                            if success:
-                                # If insertion was successful, the _id field was added to question_copy
-                                # Add it to original question
-                                if '_id' in question_copy:
-                                    q['id'] = str(question_copy['_id'])
-                        except Exception as e:
-                            print(f"Error inserting question into question bank: {str(e)}")
-                    
-                    return questions
-            except:
-                pass
             
-            # Return empty list if all parsing attempts fail
+        except Exception as e:
+            print(f"Error generating questions: {str(e)}")
             return []
     
     def submit_assessment(self, assessment_id: str, student_answers: List[Dict], student_id: str) -> Tuple[Dict, int]:
@@ -1444,7 +1340,7 @@ class AssessmentService:
     def _generate_questions_of_type_from_pdf(self, content: str, pdf_title: str, 
                                            question_type: str, num_questions: int, 
                                            pdf_id: str = None, student_id: str = None) -> List[Dict]:
-        """Generate questions of a specific type from PDF content.
+        """Generate questions of a specific type from PDF content using OpenAI structured outputs.
         
         Args:
             content: Text content of the PDF
@@ -1457,287 +1353,179 @@ class AssessmentService:
         Returns:
             List of generated questions
         """
-        # Create prompt based on question type
+        # Truncate content if too large
+        max_content_length = 8000
+        content_truncated = content[:max_content_length] if len(content) > max_content_length else content
+        
+        # Create system and user prompts based on question type
+        system_prompt = "You are an expert educator creating high-quality assessment questions from provided content."
+        
         if question_type == "MCQ":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} multiple-choice questions based on the following text from the document titled "{pdf_title}".
-            You must generate exactly {num_questions} questions.
-            Text content:
-            {content}
+            user_prompt = f"""Generate {num_questions} multiple-choice questions based on the following text from the document titled "{pdf_title}".
+You must generate exactly {num_questions} questions.
+
+Text content:
+{content_truncated}
+
+For each question:
+1. Create a challenging but fair question
+2. Provide four options
+3. Indicate the correct answer (option1, option2, option3, or option4)
+4. Include a brief explanation of why the answer is correct
+5. Set question_type to "MCQ"
+
+Make sure the questions test understanding of key concepts from the text, not just trivial details."""
+            response_model = MCQQuestionsResponse
             
-            For each question:
-            1. Create a challenging but fair question
-            2. Provide four options (option1, option2, option3, option4)
-            3. Indicate the correct answer
-            4. Include a brief explanation of why the answer is correct
-            
-            
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The question text",
-                "option1": "option 1",
-                "option2": "option 2",
-                "option3": "option 3",
-                "option4": "option 4",
-                "correctanswer": "correct option (option1, option2, option3, or option4)",
-                "explanation": "Explanation of the correct answer",
-                "question_type": "MCQ"
-              }},
-              // more questions...
-            ]
-            
-            Make sure the questions test understanding of key concepts from the text, not just trivial details.
-            """
         elif question_type == "VERY_SHORT_ANSWER":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} very short answer questions based on the following text from the document titled "{pdf_title}".
-            You must generate exactly {num_questions} questions.
-            Text content:
-            {content}
+            user_prompt = f"""Generate {num_questions} very short answer questions based on the following text from the document titled "{pdf_title}".
+You must generate exactly {num_questions} questions.
+
+Text content:
+{content_truncated}
+
+For each question:
+1. Create questions that require very brief answers (1-3 words, definitions, terms)
+2. Focus on key terminology and concepts from the text
+3. Provide a model answer that demonstrates the expected brevity
+4. Include grading criteria specific to very short answers
+5. Set question_type to "VERY_SHORT_ANSWER"
+6. Set expected_length to "1-3 words"
+
+Focus on essential terminology and key concepts from the text that can be answered concisely."""
+            response_model = VeryShortAnswerQuestionsResponse
             
-            For each question:
-            1. Create questions that require very brief answers (1-3 words, definitions, terms)
-            2. Focus on key terminology and concepts from the text
-            3. Provide a model answer that demonstrates the expected brevity
-            4. Include grading criteria specific to very short answers
-            
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The question text (e.g., 'What is...?', 'Define...', 'Name the...')",
-                "model_answer": "Expected very short answer (1-3 words)",
-                "grading_criteria": "Full marks for exact/equivalent term, partial marks for close answers, zero for incorrect",
-                "explanation": "Explaination of the expected answer",
-                "question_type": "VERY_SHORT_ANSWER",
-                "expected_length": "1-3 words"
-              }},
-              // more questions...
-            ]
-            
-            Focus on essential terminology and key concepts from the text that can be answered concisely.
-            """
         elif question_type == "SHORT_ANSWER":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} short answer questions based on the following text from the document titled "{pdf_title}".
-            You must generate exactly {num_questions} questions.
-            Text content:
-            {content}
+            user_prompt = f"""Generate {num_questions} short answer questions based on the following text from the document titled "{pdf_title}".
+You must generate exactly {num_questions} questions.
+
+Text content:
+{content_truncated}
+
+For each question:
+1. Create questions that require brief explanations (1-3 sentences)
+2. Focus on understanding and concise explanations of concepts from the text
+3. Provide a model answer that demonstrates the expected length
+4. Include specific grading criteria for short answers
+5. Set question_type to "SHORT_ANSWER"
+6. Set expected_length to "1-3 sentences"
+
+Ensure questions test understanding of the text while requiring concise responses."""
+            response_model = ShortAnswerQuestionsResponse
             
-            For each question:
-            1. Create questions that require brief explanations (1-3 sentences)
-            2. Focus on understanding and concise explanations of concepts from the text
-            3. Provide a model answer that demonstrates the expected length
-            4. Include specific grading criteria for short answers
-            
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The question text",
-                "model_answer": "Brief but complete answer (1-3 sentences)",
-                "grading_criteria": "Key points breakdown: main concept (X marks), supporting detail (Y marks), clarity (Z marks)",
-                "explanation": "explanation about the question and key concepts tested",
-                "question_type": "SHORT_ANSWER",
-                "expected_length": "1-3 sentences"
-              }},
-              // more questions...
-            ]
-            
-            Ensure questions test understanding of the text while requiring concise responses.
-            """
         elif question_type == "LONG_ANSWER":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} long answer questions based on the following text from the document titled "{pdf_title}".
-            You must generate exactly {num_questions} questions.
-            Text content:
-            {content}
+            user_prompt = f"""Generate {num_questions} long answer questions based on the following text from the document titled "{pdf_title}".
+You must generate exactly {num_questions} questions.
+
+Text content:
+{content_truncated}
+
+For each question:
+1. Create questions that require detailed explanations and analysis (multiple paragraphs)
+2. Focus on deep understanding, critical thinking, and comprehensive responses
+3. Provide a detailed model answer showing expected depth
+4. Include comprehensive grading criteria with multiple assessment points
+5. Set question_type to "LONG_ANSWER"
+6. Set expected_length to "Multiple paragraphs"
+
+Focus on higher-order thinking skills and comprehensive understanding of the text content."""
+            response_model = LongAnswerQuestionsResponse
             
-            For each question:
-            1. Create questions that require detailed explanations and analysis (multiple paragraphs)
-            2. Focus on deep understanding, critical thinking, and comprehensive responses
-            3. Provide a detailed model answer showing expected depth
-            4. Include comprehensive grading criteria with multiple assessment points
-            
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The question text",
-                "model_answer": "Comprehensive detailed answer with multiple key points and examples",
-                "grading_criteria": "Detailed breakdown: concept understanding (X marks), examples/evidence (Y marks), analysis/evaluation (Z marks), structure/clarity (W marks)",
-                "explanation": "explanation about the expected answer",
-                "question_type": "LONG_ANSWER",
-                "expected_length": "Multiple paragraphs"
-              }},
-              // more questions...
-            ]
-            
-            Focus on higher-order thinking skills and comprehensive understanding of the text content.
-            """
         elif question_type == "CASE_STUDY":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} case study questions based on the following text from the document titled "{pdf_title}".
-            You must generate exactly {num_questions} questions.
-            Text content:
-            {content}
+            user_prompt = f"""Generate {num_questions} case study questions based on the following text from the document titled "{pdf_title}".
+You must generate exactly {num_questions} questions.
+
+Text content:
+{content_truncated}
+
+For each question:
+1. Create realistic scenarios based on the text that require application of knowledge
+2. Present situations/problems that need analysis and solution using concepts from the text
+3. Require students to apply theoretical concepts to practical situations
+4. Include comprehensive grading criteria for case analysis
+5. Set question_type to "CASE_STUDY"
+6. Set scenario_type to "Application-based problem solving"
+
+Ensure scenarios are realistic and require practical application of concepts from the text."""
+            response_model = CaseStudyQuestionsResponse
             
-            For each question:
-            1. Create realistic scenarios based on the text that require application of knowledge
-            2. Present situations/problems that need analysis and solution using concepts from the text
-            3. Require students to apply theoretical concepts to practical situations
-            4. Include comprehensive grading criteria for case analysis
-            
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "Present a realistic scenario/case based on the text followed by specific questions about analysis, solutions, or applications",
-                "model_answer": "Comprehensive case analysis with problem identification, theoretical application, and practical solutions",
-                "grading_criteria": "Case analysis (X marks), theoretical application (Y marks), practical solutions (Z marks), justification (W marks)",
-                "explanation": "Overview of the case scenario and key learning objectives",
-                "question_type": "CASE_STUDY",
-                "scenario_type": "Application-based problem solving"
-              }},
-              // more questions...
-            ]
-            
-            Ensure scenarios are realistic and require practical application of concepts from the text.
-            """
         elif question_type == "FILL_BLANKS":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} fill-in-the-blank questions based on the following text from the document titled "{pdf_title}".
-            You must generate exactly {num_questions} questions.
-            Text content:
-            {content}
+            user_prompt = f"""Generate {num_questions} fill-in-the-blank questions based on the following text from the document titled "{pdf_title}".
+You must generate exactly {num_questions} questions.
+
+Text content:
+{content_truncated}
+
+For each question:
+1. Create a sentence or paragraph with key terms removed and replaced with blanks (indicated by _____)
+2. Provide the correct answers for each blank as a list
+3. Include a brief explanation for why these answers are correct
+4. Set question_type to "FILL_BLANKS"
+
+Make sure the blanks focus on important terminology or concepts from the text."""
+            response_model = FillBlanksQuestionsResponse
             
-            For each question:
-            1. Create a sentence or paragraph with key terms removed and replaced with blanks
-            2. Provide the correct answers for each blank
-            3. Include a brief explanation for why these answers are correct
-            
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The sentence with blanks indicated by _____",
-                "answers": ["Answer for blank 1", "Answer for blank 2", ...],
-                "explanation": "Explanation of the correct answers",
-                "question_type": "FILL_BLANKS"
-              }},
-              // more questions...
-            ]
-            
-            Make sure the blanks focus on important terminology or concepts from the text.
-            """
         elif question_type == "TRUEFALSE":
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} true/false questions based on the following text from the document titled "{pdf_title}".
-            You must generate exactly {num_questions} questions.
-            Text content:
-            {content}
+            user_prompt = f"""Generate {num_questions} true/false questions based on the following text from the document titled "{pdf_title}".
+You must generate exactly {num_questions} questions.
+
+Text content:
+{content_truncated}
+
+For each question:
+1. Create a challenging but clear statement that is either true or false based on the text
+2. Indicate whether the statement is true or false (lowercase: "true" or "false")
+3. Include a brief explanation of why the statement is true or false
+4. Set question_type to "TRUEFALSE"
+
+Make sure the statements are substantive and test important concepts from the text."""
+            response_model = TrueFalseQuestionsResponse
             
-            For each question:
-            1. Create a challenging but clear statement that is either true or false based on the text
-            2. Indicate whether the statement is true or false
-            3. Include a brief explanation of why the statement is true or false
-            
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The statement to evaluate as true or false",
-                "correctanswer": "true or false (lowercase)",
-                "explanation": "Explanation of why the statement is true or false",
-                "question_type": "TRUEFALSE"
-              }},
-              // more questions...
-            ]
-            
-            Make sure the statements are substantive and test important concepts from the text.
-            """
         else:
             # Default to MCQ if the type is not recognized
             question_type = "MCQ"
-            prompt_template = """
-            You are an expert educator. Generate {num_questions} multiple-choice questions based on the following text from the document titled "{pdf_title}".
-            You must generate exactly {num_questions} questions.
-            Text content:
-            {content}
-            
-            For each question:
-            1. Create a challenging but fair question
-            2. Provide four options (A, B, C, D)
-            3. Indicate the correct answer
-            4. Include a brief explanation of why the answer is correct
-            
-            
-            Format your response as a JSON array of objects with the following structure:
-            [
-              {{
-                "question": "The question text",
-                "option1": "Option A",
-                "option2": "Option B",
-                "option3": "Option C",
-                "option4": "Option D",
-                "correctanswer": "The letter of the correct option (A, B, C, or D)",
-                "explanation": "Explanation of the correct answer",
-                "question_type": "MCQ"
-              }},
-              // more questions...
-            ]
-            
-            Make sure the questions test understanding of key concepts from the text, not just trivial details.
-            """
+            user_prompt = f"""Generate {num_questions} multiple-choice questions based on the following text from the document titled "{pdf_title}".
+You must generate exactly {num_questions} questions.
+
+Text content:
+{content_truncated}
+
+For each question:
+1. Create a challenging but fair question
+2. Provide four options
+3. Indicate the correct answer (option1, option2, option3, or option4)
+4. Include a brief explanation of why the answer is correct
+5. Set question_type to "MCQ"
+
+Make sure the questions test understanding of key concepts from the text, not just trivial details."""
+            response_model = MCQQuestionsResponse
         
-        prompt = PromptTemplate.from_template(prompt_template)
-        
-        # Use the more powerful model for question generation
-        chain = prompt | self.ug_llm | StrOutputParser()
-        
-        questions_json = chain.invoke({
-            "num_questions": num_questions,
-            "pdf_title": pdf_title,
-            "content": content
-        })
-        
+        # Call OpenAI API with structured outputs
         try:
-            # Parse the generated questions
-            questions = json.loads(questions_json.replace("```json", "").replace("```", ""))
+            completion = self.openai_client.beta.chat.completions.parse(
+                model="gpt-4o-2024-08-06",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format=response_model
+            )
             
-            # Ensure all questions have the correct question_type
+            # Extract parsed questions
+            parsed_response = completion.choices[0].message.parsed
+            questions = [q.model_dump() for q in parsed_response.questions]
+            
+            # Handle specific question type validation
             for q in questions:
-                if "question_type" not in q:
-                    q["question_type"] = question_type
-                    
-                # Handle specific question type validation
                 if question_type == "TRUEFALSE" and "correctanswer" in q:
                     # Ensure the correct_answer is lowercase (true or false)
                     if isinstance(q["correctanswer"], str):
                         q["correctanswer"] = q["correctanswer"].lower()
                 
             return questions
-        except json.JSONDecodeError:
-            # If JSON parsing fails, try to extract JSON using basic pattern matching
-            try:
-                # Find JSON array in the text
-                start_idx = questions_json.find('[')
-                end_idx = questions_json.rfind(']') + 1
-                if start_idx >= 0 and end_idx > start_idx:
-                    extracted_json = questions_json[start_idx:end_idx]
-                    questions = json.loads(extracted_json)
-                    
-                    # Ensure all questions have the correct question_type
-                    for q in questions:
-                        if "question_type" not in q:
-                            q["question_type"] = question_type
-                            
-                        # Handle specific question type validation
-                        if question_type == "TRUEFALSE" and "correctanswer" in q:
-                            # Ensure the correct_answer is lowercase (true or false)
-                            if isinstance(q["correctanswer"], str):
-                                q["correctanswer"] = q["correctanswer"].lower()
-                                
-                    return questions
-            except:
-                pass
             
-            # Return empty list if all parsing attempts fail
+        except Exception as e:
+            print(f"Error generating questions from PDF: {str(e)}")
             return []
     
     def _add_images_to_questions(self, questions: List[Dict], pdf_id: str, student_id: str) -> List[Dict]:
