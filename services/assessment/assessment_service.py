@@ -366,7 +366,7 @@ class AssessmentService:
             query = text(f"""
                 SELECT content, langchain_metadata 
                 FROM {table_name}
-                WHERE langchain_metadata->>'title' = :topic
+                WHERE langchain_metadata->>'topic' = :topic
                 ORDER BY (langchain_metadata->>'chunk_index')::int
             """)
             
