@@ -16,8 +16,6 @@ from services.learning.tts_service import TTSService
 from services.auth.auth_service import AuthService
 from routers.auth import auth_middleware
 from utils.json_response import UGJSONResponse
-from middleware.generic_guard import guard_decision
-
 # Create router
 router = APIRouter(prefix="/api/learn", tags=["Learning"])
 
@@ -827,14 +825,14 @@ async def learn_subject_websocket(
         
         # Extract parameters
         question = request_data.get("question")
-        decision = guard_decision(question or "")
+        '''decision = guard_decision(question or "")
         if not decision["allow"]:
             msg = "⚠️ " + decision["message"]
             await send_text_as_content(websocket, msg)
             await websocket.send_json({"type": "content", "content": "\n"})
             await asyncio.sleep(0.1)
             await websocket.close(code=1000)
-            return
+            return'''
 
         include_pdfs = request_data.get("include_pdfs", True)
         include_images = request_data.get("include_images", True)
