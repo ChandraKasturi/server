@@ -1616,11 +1616,135 @@ def generate_assessment_title(subject: str, topics: List[str] = None, question_t
         Formatted assessment title following the pattern:
         {{SUBJECT}} – {{TOPIC(s)}} ({{DIFFICULTY}}, {{QUESTION_TYPES|short}})
     """
+    # Topic ID to Name mapping
+    TOPIC_ID_TO_NAME = {
+        # Mathematics
+        "real-numbers": "Real Numbers",
+        "polynomials": "Polynomials",
+        "linear-equations": "Linear Equations",
+        "quadratic-equations": "Quadratic Equations",
+        "arithmetic-progressions": "Arithmetic Progressions",
+        "triangles": "Triangles",
+        "coordinate-geometry": "Coordinate Geometry",
+        "introduction-to-trigonometry": "Introduction to Trigonometry",
+        "applications-of-trigonometry": "Applications of Trigonometry",
+        "circles": "Circles",
+        "areas-related-to-circles": "Areas Related to Circles",
+        "surface-areas-and-volumes": "Surface Areas and Volumes",
+        "statistics": "Statistics",
+        "probability": "Probability",
+        
+        # Science
+        "chemical-reactions-and-equations": "Chemical Reactions and Equations",
+        "acids-bases-and-salts": "Acids, Bases and Salts",
+        "metals-and-non-metals": "Metals and Non-metals",
+        "carbon-and-its-compounds": "Carbon and its Compounds",
+        "life-processes": "Life Processes",
+        "control-and-coordination": "Control and Coordination",
+        "how-do-organisms-reproduce": "How do Organisms Reproduce",
+        "heredity": "Heredity",
+        "light-reflection-and-refraction": "Light Reflection and Refraction",
+        "the-human-eye-and-the-colourful-world": "The Human Eye and the Colourful World",
+        "electricity": "Electricity",
+        "magnetic-effects-of-electric-current": "Magnetic Effects of Electric Current",
+        "our-environment": "Our Environment",
+        
+        # Social Science
+        "resources-and-development": "Resources and Development",
+        "forest-and-wildlife-resources": "Forest and Wildlife Resources",
+        "water-resources": "Water Resources",
+        "agriculture": "Agriculture",
+        "minerals-and-energy-resources": "Minerals and Energy Resources",
+        "manufacturing-industries": "Manufacturing Industries",
+        "development": "Development",
+        "sectors-of-the-indian-economy": "Sectors of the Indian Economy",
+        "money-and-credit": "Money and Credit",
+        "globalization-and-the-indian-economy": "Globalization and the Indian Economy",
+        "the-rise-of-nationalism-in-europe": "The Rise of Nationalism in Europe",
+        "nationalism-in-india": "Nationalism in India",
+        "the-making-of-a-global-world": "The Making of a Global World",
+        "print-culture-and-the-modern-world": "Print Culture and the Modern World",
+        "powersharing": "Powersharing",
+        "federalism": "Federalism",
+        "gender-religion-and-caste": "Gender, Religion and Caste",
+        "political-parties": "Political Parties",
+        "outcomes-of-democracy": "Outcomes of Democracy",
+        
+        # Hindi
+        "surdas": "सूरदास",
+        "tulsidas": "तुलसीदास",
+        "jayshankar-prasad": "जयशंकर प्रसाद",
+        "suryakant-tripathi-nirala": "सूर्यकांत त्रिपाठी 'निराला'",
+        "nagarjun": "नागार्जुन",
+        "manglesh-dabral": "मंगलेश डबराल",
+        "swayam-prakash": "स्वयं प्रकाश",
+        "ramvriksh-benipuri": "रामवृक्ष बेनीपुरी",
+        "yashpal": "यशपाल",
+        "mannu-bhandari": "मन्नू भंडारी",
+        "bhadant-anand-kausalyayan": "भदंत आनंद कौसल्यायन",
+        "kabir-sakhi": "कबीर - साखी",
+        "mira-pad": "मीरा -पद",
+        "maithilisharan-gupta-manushyata": "मैथिलीशरण गुप्ता - मनुष्यता",
+        "sumitranandan-pant-parvat-pradesh-mein-pavas": "सुमित्रानन्दन पंत - पर्वत प्रदेश में पावस",
+        "viren-dangwal-top": "वीरेन डंगवाल - तोप",
+        "kemfi-azmi-kar-chale-hum-fida": "केम्फी आजमी - कर चले हम फ़िदा",
+        "rabindranath-tagore-atmatra": "रविंद्रनाथ ठाकुर - आत्मत्राण",
+        "premchand": "प्रेमचंद",
+        "sitaram-seksariya": "सीताराम सेकसरीया",
+        "liladhar-mandloi": "लीलाधर मंडलोई",
+        "prahlad-agrawal": "प्रहलाद अग्रवाल",
+        "nida-fazli": "निदा फाजली",
+        "ravindra-kelekar": "रविंद्र केलेकर",
+        "habib-tanvir": "हबीब तनवीर",
+        "mithileshwar": "मिथिलेश्वर",
+        "gurdayal-singh": "गुरदयाल सिंह",
+        "rahi-masum-raza": "रही मासूम रजा",
+        "shivpujan-sahay": "शिवपूजन सहाय",
+        "madhu-kankaria": "मधु कांकरिया",
+        "agyeya": "अज्ञेय",
+        
+        # English
+        "reading-comprehension": "Reading Comprehension",
+        "grammar": "Grammar",
+        "creative-writing": "Creative Writing",
+        "literature": "Literature",
+        "a-letter-to-god": "A Letter to God",
+        "long-walk-to-freedom": "Long Walk to Freedom",
+        "his-first-flight": "His First Flight",
+        "black-aeroplane": "Black Aeroplane",
+        "from-the-diary-of-anne-frank": "From the Diary of Anne Frank",
+        "a-baker-from-goa": "A Baker from Goa",
+        "coorg": "Coorg",
+        "tea-from-assam": "Tea from Assam",
+        "mijbil-the-otter": "Mijbil the Otter",
+        "madam-rides-the-bus": "Madam Rides the Bus",
+        "the-sermon-at-benares": "The Sermon at Benares",
+        "the-proposal": "The Proposal",
+        "dust-of-snow": "Dust of Snow",
+        "fire-and-ice": "Fire and Ice",
+        "a-tiger-in-the-zoo": "A Tiger in the Zoo",
+        "how-to-tell-wild-animals": "How to Tell Wild Animals",
+        "the-ball-poem": "The Ball Poem",
+        "amanda": "Amanda",
+        "the-trees": "The Trees",
+        "fog": "Fog",
+        "the-tale-of-custard-the-dragon": "The Tale of Custard the Dragon",
+        "for-anne-gregory": "For Anne Gregory",
+    }
+    
     # Normalize inputs
     if not topics:
         topics = []
     if not question_types:
         question_types = ["MCQ"]
+    
+    # Convert topic IDs to readable names
+    readable_topics = []
+    for topic in topics:
+        # Try to get the readable name from the mapping, fallback to the original topic
+        readable_name = TOPIC_ID_TO_NAME.get(topic, topic)
+        readable_topics.append(readable_name)
+    topics = readable_topics
     
     # Clean and normalize subject name
     subject = subject.replace("x_", "").replace("_", " ").title()
